@@ -22,15 +22,27 @@ import asterdex_grid_optimizer as optimizer
 try:
     import candle_db
     DB_AVAILABLE = True
-except ImportError:
+    print("[APP] Database module loaded successfully")
+except ImportError as e:
     DB_AVAILABLE = False
+    print(f"[APP] Database module not available: {e}")
 
 app = Flask(__name__)
 CORS(app)
 
 # Initialize database on startup
 if DB_AVAILABLE:
-    candle_db.init_db()
+    if candle_db.DATABASE_URL:
+        print("[APP] DATABASE_URL is set, initializing database...")
+        db_init_success = candle_db.init_db()
+        if db_init_success:
+            print("[APP] Database ready for caching")
+        else:
+            print("[APP] Database initialization failed - falling back to API-only mode")
+    else:
+        print("[APP] No DATABASE_URL found - running in API-only mode (no caching)")
+else:
+    print("[APP] Running without database support")
 
 # In-memory job storage (for local use)
 jobs = {}
@@ -373,6 +385,54 @@ def health_check():
         'timestamp': datetime.now().isoformat(),
         'database': db_status
     })
+
+
+@app.route('/api/db/init', methods=['POST'])
+def init_database():
+    """Manually initialize/reinitialize the database."""
+    if not DB_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'error': 'Database module not available'
+        }), 500
+
+    if not candle_db.DATABASE_URL:
+        # List environment variables that might contain DB URL (for debugging)
+        db_vars = ['DATABASE_URL', 'DATABASE_PRIVATE_URL', 'POSTGRES_URL', 'POSTGRESQL_URL', 'PGHOST']
+        found_vars = {var: bool(os.environ.get(var)) for var in db_vars}
+        return jsonify({
+            'success': False,
+            'error': 'No database URL configured',
+            'env_vars_checked': found_vars
+        }), 500
+
+    try:
+        success = candle_db.init_db()
+        if success:
+            # Get row count
+            conn = candle_db.get_connection()
+            row_count = 0
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM candles")
+                    row_count = cur.fetchone()[0]
+                conn.close()
+
+            return jsonify({
+                'success': True,
+                'message': 'Database initialized successfully',
+                'row_count': row_count
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Database initialization failed - check server logs'
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 # =============================================================================

@@ -10,8 +10,46 @@ from psycopg2.extras import execute_values
 from datetime import datetime
 import pandas as pd
 
+
+def get_database_url():
+    """
+    Get database URL from environment.
+    Railway may use different variable names depending on configuration.
+    """
+    # Check common Railway PostgreSQL variable names
+    possible_vars = [
+        'DATABASE_URL',
+        'DATABASE_PRIVATE_URL',  # Railway internal URL
+        'POSTGRES_URL',
+        'POSTGRESQL_URL',
+    ]
+
+    for var in possible_vars:
+        url = os.environ.get(var)
+        if url:
+            # Fix postgres:// to postgresql:// (required by some psycopg2 versions)
+            if url.startswith('postgres://'):
+                url = url.replace('postgres://', 'postgresql://', 1)
+            print(f"[DB] Found database URL in {var}")
+            return url
+
+    # Check if individual PG* variables are set (Railway sometimes uses these)
+    pg_host = os.environ.get('PGHOST')
+    pg_port = os.environ.get('PGPORT', '5432')
+    pg_user = os.environ.get('PGUSER')
+    pg_password = os.environ.get('PGPASSWORD')
+    pg_database = os.environ.get('PGDATABASE')
+
+    if pg_host and pg_user and pg_password and pg_database:
+        url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+        print(f"[DB] Constructed database URL from PG* variables")
+        return url
+
+    return None
+
+
 # Get database URL from environment (Railway provides this)
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = get_database_url()
 
 
 def get_connection():
