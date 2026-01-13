@@ -1,0 +1,347 @@
+# ASTeRDEX Long Grid Bot Optimizer - Full Stack Implementation
+
+## ROLE
+Expert Python Quantitative Developer & Full Stack Engineer
+
+## OBJECTIVE
+Create a complete web application that connects to the **ASTeRDEX** exchange API to fetch historical 1-minute candle data and runs a "Long Grid Bot" optimization backtest to find the mathematically optimal number of grids for a specific price range.
+
+## CONTEXT
+- Exchange: ASTeRDEX (Aster Finance)
+- API Base URL: `https://fapi.asterdex.com`
+- Strategy: Long-Only Grid Bot
+- The strategy assumes:
+  1. **Fixed Range:** User defines a Lower Limit and Upper Limit
+  2. **Capital:** Split equally among all grid lines (Position = Total Capital / Num Grids)
+  3. **Execution:** Buy at grid lines; Sell when price moves up by one grid spacing
+
+---
+
+## PART 1: ASTERDEX API INTEGRATION
+
+### API Endpoints Required
+
+1. **Klines (Candlestick Data)**
+   - Endpoint: `GET /fapi/v1/klines`
+   - Parameters:
+     - `symbol` (STRING, required): e.g., "BTCUSDT"
+     - `interval` (ENUM, required): "1m" for 1-minute candles
+     - `startTime` (LONG, optional): Start timestamp in milliseconds
+     - `endTime` (LONG, optional): End timestamp in milliseconds
+     - `limit` (INT, optional): Default 500, max 1500
+   - Response: Array of arrays with format:
+     [open_time, open, high, low, close, volume, close_time, quote_volume, trades, taker_buy_base, taker_buy_quote, ignore]
+
+2. **Current Price**
+   - Endpoint: `GET /fapi/v1/ticker/price`
+   - Parameters: `symbol` (STRING)
+   - Response: `{"symbol": "BTCUSDT", "price": "91994.30"}`
+
+3. **Available Symbols**
+   - Endpoint: `GET /fapi/v1/exchangeInfo`
+   - Response contains `symbols` array with objects having `symbol` and `status` fields
+
+### Data Fetching Requirements
+- Implement pagination to fetch 30+ days of 1-minute data (max 1500 candles per request)
+- Add 100ms delay between requests for rate limiting
+- Clean data: Convert timestamps to datetime, sort by time, drop duplicates and NaN values
+- Support progress callbacks for UI updates
+
+---
+
+## PART 2: CORE BACKTEST LOGIC (CRITICAL - IMPLEMENT EXACTLY)
+
+```python
+import numpy as np
+import pandas as pd
+
+def run_backtest_grids(df, num_grids, lower, upper, capital=10000):
+    """
+    Run a vectorized backtest for a Long Grid Bot strategy.
+
+    The strategy:
+    - Divides the price range [lower, upper] into num_grids levels
+    - Buys at each grid level when price drops to it
+    - Sells when price rises by one grid spacing
+    - Capital is equally distributed among all grid levels
+    """
+    if num_grids < 2:
+        return {
+            'num_grids': num_grids,
+            'spacing': 0,
+            'total_trades': 0,
+            'total_profit': 0,
+            'roi_percent': 0
+        }
+
+    # 1. Setup Grid Levels
+    rng = upper - lower
+    spacing = rng / num_grids
+
+    # Buy levels are strictly lower, lower+spacing, ... up to N-1
+    buy_levels = np.array([lower + i * spacing for i in range(num_grids)])
+    sell_levels = buy_levels + spacing
+
+    per_grid_capital = capital / num_grids
+
+    # 2. State Initialization
+    # Positions[i] = True means we hold inventory for grid level i
+    positions = np.zeros(num_grids, dtype=bool)
+
+    # If price starts below a grid, we assume we bought it immediately at open
+    start_price = df.iloc[0]['open']
+    positions[buy_levels < start_price] = True
+
+    total_profit = 0.0
+    trade_count = 0
+
+    # Pre-calculate profit per successful swing for each level
+    # Profit = Investment * (Sell - Buy) / Buy
+    level_profits = per_grid_capital * (spacing / buy_levels)
+
+    # 3. Vectorized Simulation Loop
+    opens = df['open'].values
+    highs = df['high'].values
+    lows = df['low'].values
+    closes = df['close'].values
+
+    for i in range(len(df)):
+        O, H, L, C = opens[i], highs[i], lows[i], closes[i]
+
+        # Determine intra-candle path (High/Low processing order) based on candle color
+        if C >= O:
+            # Green Candle: Open -> Low -> High -> Close
+            # A. Check Buys at Low
+            buy_mask = (~positions) & (buy_levels >= L - 1e-9)
+            positions[buy_mask] = True
+
+            # B. Check Sells at High
+            sell_mask = (positions) & (sell_levels <= H + 1e-9)
+            if np.any(sell_mask):
+                executed = np.sum(sell_mask)
+                trade_count += executed
+                total_profit += np.sum(level_profits[sell_mask])
+                positions[sell_mask] = False
+
+        else:
+            # Red Candle: Open -> High -> Low -> Close
+            # A. Check Sells at High
+            sell_mask = (positions) & (sell_levels <= H + 1e-9)
+            if np.any(sell_mask):
+                executed = np.sum(sell_mask)
+                trade_count += executed
+                total_profit += np.sum(level_profits[sell_mask])
+                positions[sell_mask] = False
+
+            # B. Check Buys at Low
+            buy_mask = (~positions) & (buy_levels >= L - 1e-9)
+            positions[buy_mask] = True
+
+    return {
+        'num_grids': num_grids,
+        'spacing': spacing,
+        'total_trades': trade_count,
+        'total_profit': total_profit,
+        'roi_percent': (total_profit / capital) * 100
+    }
+```
+
+### Optimization Routine
+- Loop `num_grids` from 2 to 200 (configurable max)
+- Store results in DataFrame with additional metrics:
+  - `profit_per_trade = total_profit / total_trades`
+  - `trades_per_day = total_trades / (candles / 1440)`
+  - `daily_roi = roi_percent / (candles / 1440)`
+- Sort by `total_profit` descending to find optimal configuration
+
+---
+
+## PART 3: WEB APPLICATION ARCHITECTURE
+
+### Project Structure
+```
+project/
+├── app.py                     # Flask backend with REST API
+├── asterdex_grid_optimizer.py # Core optimization engine
+├── requirements.txt           # Dependencies
+├── templates/
+│   └── index.html            # Main UI page
+└── static/
+    ├── css/
+    │   └── style.css         # Dark theme styling
+    └── js/
+        └── app.js            # Frontend + Chart.js
+```
+
+### Flask Backend (app.py)
+
+**API Endpoints:**
+
+| Endpoint              | Method | Description                                         |
+|-----------------------|--------|-----------------------------------------------------|
+| `/`                   | GET    | Serve main HTML page                                |
+| `/api/symbols`        | GET    | Return list of available trading pairs              |
+| `/api/price/<symbol>` | GET    | Get current price, return default lower/upper (±10%)|
+| `/api/optimize`       | POST   | Start optimization job (runs in background thread)  |
+| `/api/status/<job_id>`| GET    | Check job progress and get results                  |
+| `/api/health`         | GET    | Health check endpoint                               |
+
+**Key Implementation Details:**
+- Use `threading` for background job processing
+- Store jobs in-memory dict with: `status`, `progress`, `message`, `result`, `error`
+- Progress updates at two phases: data fetching (0-40%) and optimization (50-100%)
+- Return job_id immediately, client polls `/api/status/<job_id>` every 500ms
+
+**POST /api/optimize Request Body:**
+```json
+{
+  "symbol": "BTCUSDT",
+  "lower_limit": 85000,
+  "upper_limit": 95000,
+  "capital": 10000,
+  "lookback_days": 30,
+  "max_grids": 200
+}
+```
+
+**Completed Job Response Structure:**
+```json
+{
+  "success": true,
+  "status": "completed",
+  "progress": 100,
+  "result": {
+    "data_info": {
+      "total_candles": 43200,
+      "date_start": "2025-12-13 00:00",
+      "date_end": "2026-01-12 00:00",
+      "price_low": 82500.00,
+      "price_high": 98750.00
+    },
+    "optimal": {
+      "num_grids": 45,
+      "spacing": 222.22,
+      "total_trades": 1250,
+      "total_profit": 3500.50,
+      "roi_percent": 35.01,
+      "profit_per_trade": 2.80,
+      "trades_per_day": 41.67,
+      "daily_roi": 1.17
+    },
+    "all_results": [...],
+    "top_results": [...]
+  }
+}
+```
+
+---
+
+## PART 4: FRONTEND IMPLEMENTATION
+
+### HTML Structure (index.html)
+- Header with logo and title
+- Left sidebar: Configuration panel with form inputs
+- Main area: Results display (initially shows placeholder)
+- Form inputs:
+  - Symbol dropdown (populated from API)
+  - Lower/Upper price limit inputs (auto-populated from current price ±10%)
+  - Capital input (default: 10000)
+  - Lookback days slider (7-90, default: 30)
+  - Max grids input (default: 200)
+- Progress bar (shown during optimization)
+- Results section:
+  - 6 summary cards (Optimal Grids, Spacing, Total Profit, ROI, Total Trades, Profit/Trade)
+  - Data info bar (date range, candle count, price range)
+  - Two Chart.js charts
+  - Sortable results table (top 20)
+
+### CSS Styling (style.css)
+- Dark theme with CSS variables:
+  ```css
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --accent-primary: #58a6ff;
+  --accent-success: #3fb950;
+  --accent-danger: #f85149;
+  --border-color: #30363d;
+  ```
+- Responsive grid layout (sidebar collapses on mobile)
+- Gradient backgrounds for "optimal" and "profit" cards
+- Animated progress bar
+- Styled scrollbars and form elements
+
+### JavaScript (app.js)
+
+**Key Functions:**
+1. `initializeApp()` - Load symbols, set up event listeners, fetch initial price
+2. `fetchCurrentPrice()` - Get price and auto-populate lower/upper limits
+3. `handleFormSubmit()` - Validate inputs, POST to `/api/optimize`, start polling
+4. `startPolling()` / `checkJobStatus()` - Poll every 500ms until complete
+5. `displayResults()` - Render summary cards, charts, and table
+6. `createCharts()` - Two Chart.js charts:
+   - Line chart: Profit vs Number of Grids (optimal point highlighted in red)
+   - Bar chart: Trade count vs Number of Grids
+7. `handleSort()` - Client-side table sorting by any column
+
+**Chart.js Configuration:**
+- Dark theme colors matching CSS
+- Optimal point highlighted with larger red dot
+- Tooltips with dark background
+- Grid lines using `--bg-tertiary` color
+
+---
+
+## PART 5: DEPENDENCIES
+
+### requirements.txt
+```
+flask>=2.3.0
+flask-cors>=4.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+requests>=2.31.0
+```
+
+### Frontend (CDN)
+```html
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+```
+
+---
+
+## PART 6: RUNNING THE APPLICATION
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the server (default port 5001 to avoid macOS AirPlay conflict)
+python app.py
+
+# Or specify custom port
+python app.py 8080
+```
+
+Open browser to `http://localhost:5001`
+
+---
+
+## DELIVERABLES
+
+Create the complete, runnable web application with:
+1. `asterdex_grid_optimizer.py` - Core optimization engine with progress callbacks
+2. `app.py` - Flask backend with all API endpoints
+3. `templates/index.html` - Complete HTML structure
+4. `static/css/style.css` - Dark theme styling
+5. `static/js/app.js` - Frontend logic with Chart.js integration
+6. `requirements.txt` - Python dependencies
+
+The application should:
+- Fetch live data from ASTeRDEX API
+- Show real-time progress during optimization
+- Display interactive charts with optimal configuration highlighted
+- Provide sortable results table
+- Work entirely in the browser with no additional setup required

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASTeRDEX Grid Bot Optimizer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <span class="logo-icon">&#9670;</span>
+                <h1>Grid Bot Optimizer</h1>
+            </div>
+            <div class="header-subtitle">ASTeRDEX Long Grid Strategy Backtester</div>
+        </header>
+
+        <main class="main-content">
+            <!-- Configuration Panel -->
+            <aside class="config-panel">
+                <div class="panel-header">
+                    <h2>Configuration</h2>
+                </div>
+
+                <form id="optimizer-form" class="config-form">
+                    <!-- Symbol Selection -->
+                    <div class="form-group">
+                        <label for="symbol">Trading Pair</label>
+                        <select id="symbol" name="symbol" required>
+                            <option value="BTCUSDT" selected>BTCUSDT</option>
+                        </select>
+                        <span class="current-price" id="current-price">Loading...</span>
+                    </div>
+
+                    <!-- Price Range -->
+                    <div class="form-group">
+                        <label for="lower-limit">Lower Price Limit ($)</label>
+                        <input type="number" id="lower-limit" name="lower_limit"
+                               step="0.01" min="0" required placeholder="e.g., 85000">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="upper-limit">Upper Price Limit ($)</label>
+                        <input type="number" id="upper-limit" name="upper_limit"
+                               step="0.01" min="0" required placeholder="e.g., 105000">
+                    </div>
+
+                    <!-- Capital -->
+                    <div class="form-group">
+                        <label for="capital">Trading Capital ($)</label>
+                        <input type="number" id="capital" name="capital"
+                               value="10000" step="100" min="100" required>
+                    </div>
+
+                    <!-- Lookback Period -->
+                    <div class="form-group">
+                        <label for="lookback-days">
+                            Lookback Period: <span id="lookback-value">30</span> days
+                        </label>
+                        <input type="range" id="lookback-days" name="lookback_days"
+                               min="7" max="90" value="30">
+                    </div>
+
+                    <!-- Max Grids -->
+                    <div class="form-group">
+                        <label for="max-grids">Max Grids to Test</label>
+                        <input type="number" id="max-grids" name="max_grids"
+                               value="200" min="10" max="500" required>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" id="run-btn" class="btn-primary">
+                        <span class="btn-text">Run Optimization</span>
+                        <span class="btn-loader" style="display: none;"></span>
+                    </button>
+                </form>
+
+                <!-- Progress Bar -->
+                <div class="progress-container" id="progress-container" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <div class="progress-text" id="progress-text">Starting...</div>
+                </div>
+            </aside>
+
+            <!-- Results Panel -->
+            <section class="results-panel">
+                <!-- Initial State -->
+                <div class="results-placeholder" id="results-placeholder">
+                    <div class="placeholder-icon">&#9776;</div>
+                    <h3>Configure and Run Optimization</h3>
+                    <p>Set your grid parameters and click "Run Optimization" to find the optimal grid configuration for your trading range.</p>
+                </div>
+
+                <!-- Results Content (hidden initially) -->
+                <div class="results-content" id="results-content" style="display: none;">
+                    <!-- Summary Cards -->
+                    <div class="summary-cards">
+                        <div class="summary-card optimal">
+                            <div class="card-label">Optimal Grids</div>
+                            <div class="card-value" id="optimal-grids">--</div>
+                            <div class="card-sublabel">Grid Count</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="card-label">Grid Spacing</div>
+                            <div class="card-value" id="grid-spacing">--</div>
+                            <div class="card-sublabel">USD per level</div>
+                        </div>
+                        <div class="summary-card profit">
+                            <div class="card-label">Total Profit</div>
+                            <div class="card-value" id="total-profit">--</div>
+                            <div class="card-sublabel">Backtested</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="card-label">ROI</div>
+                            <div class="card-value" id="roi-percent">--</div>
+                            <div class="card-sublabel">Return on Capital</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="card-label">Total Trades</div>
+                            <div class="card-value" id="total-trades">--</div>
+                            <div class="card-sublabel">Executed</div>
+                        </div>
+                        <div class="summary-card">
+                            <div class="card-label">Profit/Trade</div>
+                            <div class="card-value" id="profit-per-trade">--</div>
+                            <div class="card-sublabel">Average</div>
+                        </div>
+                    </div>
+
+                    <!-- Data Info -->
+                    <div class="data-info" id="data-info">
+                        <span class="info-item"><strong>Data:</strong> <span id="data-range">--</span></span>
+                        <span class="info-item"><strong>Candles:</strong> <span id="data-candles">--</span></span>
+                        <span class="info-item"><strong>Price Range:</strong> <span id="data-prices">--</span></span>
+                    </div>
+
+                    <!-- Charts -->
+                    <div class="charts-container">
+                        <div class="chart-wrapper">
+                            <h3>Profit vs Number of Grids</h3>
+                            <canvas id="profit-chart"></canvas>
+                        </div>
+                        <div class="chart-wrapper">
+                            <h3>Trade Count vs Number of Grids</h3>
+                            <canvas id="trades-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Results Table -->
+                    <div class="table-container">
+                        <h3>Top 20 Configurations</h3>
+                        <table class="results-table" id="results-table">
+                            <thead>
+                                <tr>
+                                    <th data-sort="num_grids">Grids</th>
+                                    <th data-sort="spacing">Spacing</th>
+                                    <th data-sort="total_trades">Trades</th>
+                                    <th data-sort="total_profit">Profit ($)</th>
+                                    <th data-sort="roi_percent">ROI (%)</th>
+                                    <th data-sort="profit_per_trade">$/Trade</th>
+                                    <th data-sort="trades_per_day">Trades/Day</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Error State -->
+                <div class="error-message" id="error-message" style="display: none;">
+                    <div class="error-icon">&#9888;</div>
+                    <h3>Optimization Failed</h3>
+                    <p id="error-text"></p>
+                    <button class="btn-secondary" onclick="resetUI()">Try Again</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>ASTeRDEX Grid Bot Optimizer | Data from <a href="https://asterdex.com" target="_blank">ASTeRDEX</a></p>
+        </footer>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
