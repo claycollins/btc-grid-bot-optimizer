@@ -59,8 +59,8 @@ def get_price(symbol):
                 'success': True,
                 'symbol': symbol,
                 'price': price,
-                'default_lower': round(price * 0.9, 2),
-                'default_upper': round(price * 1.1, 2)
+                'default_lower': 85000,
+                'default_upper': 95000
             })
         else:
             return jsonify({

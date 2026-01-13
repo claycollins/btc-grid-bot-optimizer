@@ -16,7 +16,8 @@
       "Bash(/tmp/gh_2.63.2_macOS_arm64/bin/gh:*)",
       "Bash(unzip:*)",
       "Bash(git push:*)",
-      "Bash(git revert:*)"
+      "Bash(git revert:*)",
+      "Bash(git rm:*)"
     ]
   }
 }
