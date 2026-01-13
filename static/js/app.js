@@ -320,6 +320,35 @@ function displayResults(result) {
     document.getElementById('data-candles').textContent = formatNumber(info.total_candles, 0);
     document.getElementById('data-prices').textContent = `$${formatNumber(info.price_low, 2)} - $${formatNumber(info.price_high, 2)}`;
 
+    // Update cache stats display
+    const cacheStatsItem = document.getElementById('cache-stats-item');
+    const dataSourceEl = document.getElementById('data-source');
+    if (info.cache_stats) {
+        const stats = info.cache_stats;
+        let sourceText = '';
+        let sourceClass = '';
+
+        if (stats.source === 'cache') {
+            sourceText = `100% from cache (${formatNumber(stats.cached_count, 0)} candles)`;
+            sourceClass = 'source-cache';
+        } else if (stats.source === 'api_only') {
+            sourceText = `100% from API (no database configured)`;
+            sourceClass = 'source-api';
+        } else if (stats.source === 'api') {
+            sourceText = `100% from API (${formatNumber(stats.api_count, 0)} candles fetched)`;
+            sourceClass = 'source-api';
+        } else if (stats.source === 'mixed') {
+            sourceText = `${stats.cache_percent}% cached, ${100 - stats.cache_percent}% from API`;
+            sourceClass = 'source-mixed';
+        }
+
+        dataSourceEl.textContent = sourceText;
+        dataSourceEl.className = sourceClass;
+        cacheStatsItem.style.display = 'inline';
+    } else {
+        cacheStatsItem.style.display = 'none';
+    }
+
     // Create charts
     createCharts(result.all_results, optimal.num_grids);
 

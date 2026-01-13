@@ -240,18 +240,34 @@ def fetch_historical_klines_cached(
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     verbose: bool = True,
     progress_callback=None
-) -> pd.DataFrame:
+) -> tuple:
     """
     Fetch historical kline data with PostgreSQL caching.
     Checks DB first, only fetches missing data from API.
 
     Parameters are same as fetch_historical_klines.
+
+    Returns:
+        tuple: (DataFrame, cache_stats dict)
+        cache_stats contains: cached_count, api_count, total_count, cache_percent, source
     """
+    cache_stats = {
+        'cached_count': 0,
+        'api_count': 0,
+        'total_count': 0,
+        'cache_percent': 0,
+        'source': 'api'  # 'api', 'cache', 'mixed', or 'api_only'
+    }
+
     if not DB_AVAILABLE or not candle_db.DATABASE_URL:
         # Fallback to direct API fetch if DB not available
         if verbose:
             print("[INFO] Database not configured, fetching from API...")
-        return fetch_historical_klines(symbol, interval, lookback_days, verbose, progress_callback)
+        df = fetch_historical_klines(symbol, interval, lookback_days, verbose, progress_callback)
+        cache_stats['api_count'] = len(df)
+        cache_stats['total_count'] = len(df)
+        cache_stats['source'] = 'api_only'
+        return df, cache_stats
 
     # Calculate time range
     end_time = datetime.now()
@@ -282,7 +298,11 @@ def fetch_historical_klines_cached(
             print(f"Using cached data ({cached_count:,} candles)")
         if progress_callback:
             progress_callback(40, "Using cached data...")
-        return cached_df
+        cache_stats['cached_count'] = cached_count
+        cache_stats['total_count'] = cached_count
+        cache_stats['cache_percent'] = 100
+        cache_stats['source'] = 'cache'
+        return cached_df, cache_stats
 
     # Find missing ranges and fetch from API
     missing_ranges = candle_db.get_missing_ranges(symbol, start_time, end_time)
@@ -291,6 +311,7 @@ def fetch_historical_klines_cached(
         print(f"Missing ranges: {len(missing_ranges)}")
 
     all_new_data = []
+    api_fetched = 0
     for i, (range_start, range_end) in enumerate(missing_ranges):
         range_days = (range_end - range_start).days + 1
         if verbose:
@@ -314,6 +335,7 @@ def fetch_historical_klines_cached(
             new_df = new_df[(new_df['timestamp'] >= range_start) &
                            (new_df['timestamp'] <= range_end)]
             all_new_data.append(new_df)
+            api_fetched += len(new_df)
 
             # Save to database
             candle_db.save_candles(symbol, new_df)
@@ -337,7 +359,15 @@ def fetch_historical_klines_cached(
         if len(final_df) > 0:
             print(f"Date range: {final_df['timestamp'].min()} to {final_df['timestamp'].max()}")
 
-    return final_df
+    # Update cache stats
+    total = len(final_df)
+    cache_stats['cached_count'] = cached_count
+    cache_stats['api_count'] = api_fetched
+    cache_stats['total_count'] = total
+    cache_stats['cache_percent'] = round((cached_count / total * 100), 1) if total > 0 else 0
+    cache_stats['source'] = 'cache' if api_fetched == 0 else ('mixed' if cached_count > 0 else 'api')
+
+    return final_df, cache_stats
 
 
 def get_current_price(symbol: str = DEFAULT_SYMBOL) -> float:

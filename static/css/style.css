@@ -414,6 +414,22 @@ body {
     color: var(--text-primary);
 }
 
+/* Cache stats source indicators */
+.source-cache {
+    color: var(--accent-success);
+    font-weight: 500;
+}
+
+.source-api {
+    color: var(--accent-warning);
+    font-weight: 500;
+}
+
+.source-mixed {
+    color: var(--accent-primary);
+    font-weight: 500;
+}
+
 /* Charts */
 .charts-container {
     display: grid;

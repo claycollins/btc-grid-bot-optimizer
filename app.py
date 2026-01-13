@@ -190,8 +190,17 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
         # Fetch historical data (use cached version if DB available)
         progress_callback(5, 'Fetching historical data...')
 
+        # Default cache stats for API-only mode
+        cache_stats = {
+            'cached_count': 0,
+            'api_count': 0,
+            'total_count': 0,
+            'cache_percent': 0,
+            'source': 'api_only'
+        }
+
         if DB_AVAILABLE and candle_db.DATABASE_URL:
-            df = optimizer.fetch_historical_klines_cached(
+            df, cache_stats = optimizer.fetch_historical_klines_cached(
                 symbol=symbol,
                 interval='1m',
                 lookback_days=lookback_days,
@@ -206,19 +215,22 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 verbose=False,
                 progress_callback=progress_callback
             )
+            cache_stats['api_count'] = len(df)
+            cache_stats['total_count'] = len(df)
 
         if df.empty:
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['error'] = 'Failed to fetch historical data'
             return
 
-        # Get data info
+        # Get data info including cache stats
         data_info = {
             'total_candles': len(df),
             'date_start': df['timestamp'].min().strftime('%Y-%m-%d %H:%M'),
             'date_end': df['timestamp'].max().strftime('%Y-%m-%d %H:%M'),
             'price_low': float(df['low'].min()),
-            'price_high': float(df['high'].max())
+            'price_high': float(df['high'].max()),
+            'cache_stats': cache_stats
         }
 
         progress_callback(45, 'Running optimization...')
