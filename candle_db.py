@@ -24,14 +24,19 @@ def get_connection():
 def init_db():
     """Initialize the database schema."""
     if not DATABASE_URL:
-        print("No DATABASE_URL configured, skipping DB init")
+        print("[DB] No DATABASE_URL configured, skipping DB init")
         return False
 
-    conn = get_connection()
-    if not conn:
-        return False
+    # Log connection attempt (mask password)
+    masked_url = DATABASE_URL.split('@')[-1] if '@' in DATABASE_URL else 'configured'
+    print(f"[DB] Attempting to connect to: ...@{masked_url}")
 
     try:
+        conn = get_connection()
+        if not conn:
+            print("[DB] Failed to get connection")
+            return False
+
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS candles (
@@ -48,14 +53,20 @@ def init_db():
                 CREATE INDEX IF NOT EXISTS idx_candles_symbol_timestamp
                 ON candles(symbol, timestamp);
             """)
-        conn.commit()
-        print("Database initialized successfully")
+            conn.commit()
+
+            # Verify table was created and get row count
+            cur.execute("SELECT COUNT(*) FROM candles")
+            count = cur.fetchone()[0]
+            print(f"[DB] Database initialized successfully. Candles table has {count:,} rows")
+
         return True
     except Exception as e:
-        print(f"Database init error: {e}")
+        print(f"[DB] Database init error: {e}")
         return False
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def get_cached_candles(symbol: str, start_time: datetime, end_time: datetime) -> pd.DataFrame:

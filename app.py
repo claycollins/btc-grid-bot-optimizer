@@ -339,11 +339,39 @@ def download_candles():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint with database diagnostics."""
+    db_status = {
+        'configured': bool(DB_AVAILABLE and candle_db.DATABASE_URL),
+        'connected': False,
+        'table_exists': False,
+        'row_count': 0
+    }
+
+    if db_status['configured']:
+        try:
+            conn = candle_db.get_connection()
+            if conn:
+                db_status['connected'] = True
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'candles'
+                        )
+                    """)
+                    db_status['table_exists'] = cur.fetchone()[0]
+
+                    if db_status['table_exists']:
+                        cur.execute("SELECT COUNT(*) FROM candles")
+                        db_status['row_count'] = cur.fetchone()[0]
+                conn.close()
+        except Exception as e:
+            db_status['error'] = str(e)
+
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'database': 'connected' if (DB_AVAILABLE and candle_db.DATABASE_URL) else 'not configured'
+        'database': db_status
     })
 
 
