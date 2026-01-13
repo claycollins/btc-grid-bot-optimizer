@@ -321,15 +321,16 @@ def get_job_status(job_id):
 
 @app.route('/api/download/candles', methods=['GET'])
 def download_candles():
-    """Download candle data as CSV from the database."""
+    """Download candle data as CSV from the database (legacy endpoint)."""
     symbol = request.args.get('symbol', 'BTCUSDT').upper().replace('/', '')
     lookback_days = int(request.args.get('lookback_days', 30))
 
     if not DB_AVAILABLE or not candle_db.DATABASE_URL:
         return jsonify({
             'success': False,
-            'error': 'Database not configured'
-        }), 500
+            'error': 'CSV download is now handled client-side. Please run an optimization and use the Download button on the results page.',
+            'hint': 'If you are seeing this in the browser, please refresh the page to get the latest version.'
+        }), 400
 
     # Calculate time range
     end_time = datetime.now()
