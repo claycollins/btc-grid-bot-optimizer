@@ -256,8 +256,10 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 'daily_roi': float(optimal['daily_roi']) if optimal['daily_roi'] == optimal['daily_roi'] else 0
             },
             'all_results': all_results,
-            'top_results': all_results[:20]
-            # Note: candle_data removed - download from DB via /api/download endpoint
+            'top_results': all_results[:20],
+            'candle_data': df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].assign(
+                timestamp=df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            ).to_dict('records')
         }
 
     except Exception as e:
