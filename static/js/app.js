@@ -58,6 +58,33 @@ function setupEventListeners() {
     document.querySelectorAll('.results-table th[data-sort]').forEach(th => {
         th.addEventListener('click', () => handleSort(th.dataset.sort));
     });
+
+    // Add thousands separators to numeric inputs
+    const numericInputs = ['lower-limit', 'upper-limit', 'capital'];
+    numericInputs.forEach(id => {
+        const input = document.getElementById(id);
+        input.addEventListener('focus', handleNumericFocus);
+        input.addEventListener('blur', handleNumericBlur);
+    });
+}
+
+function handleNumericFocus(e) {
+    // Remove formatting on focus to allow editing
+    const value = e.target.value.replace(/,/g, '');
+    e.target.value = value;
+    e.target.type = 'number';
+}
+
+function handleNumericBlur(e) {
+    // Add formatting on blur
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+        e.target.type = 'text';
+        e.target.value = value.toLocaleString('en-US', {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2
+        });
+    }
 }
 
 // =============================================================================
@@ -99,12 +126,24 @@ async function fetchCurrentPrice() {
             document.getElementById('lower-limit').placeholder = formatNumber(data.default_lower, 2);
             document.getElementById('upper-limit').placeholder = formatNumber(data.default_upper, 2);
 
-            // Set values if empty
-            if (!document.getElementById('lower-limit').value) {
-                document.getElementById('lower-limit').value = data.default_lower;
+            // Set values if empty (with formatting)
+            const lowerInput = document.getElementById('lower-limit');
+            const upperInput = document.getElementById('upper-limit');
+            if (!lowerInput.value) {
+                lowerInput.type = 'text';
+                lowerInput.value = formatNumberInput(data.default_lower);
             }
-            if (!document.getElementById('upper-limit').value) {
-                document.getElementById('upper-limit').value = data.default_upper;
+            if (!upperInput.value) {
+                upperInput.type = 'text';
+                upperInput.value = formatNumberInput(data.default_upper);
+            }
+
+            // Format capital on initial load
+            const capitalInput = document.getElementById('capital');
+            if (capitalInput.value && capitalInput.type !== 'text') {
+                const capValue = parseFloat(capitalInput.value);
+                capitalInput.type = 'text';
+                capitalInput.value = formatNumberInput(capValue);
             }
         } else {
             priceDisplay.textContent = 'Price unavailable';
@@ -116,14 +155,19 @@ async function fetchCurrentPrice() {
     }
 }
 
+function parseFormattedNumber(value) {
+    // Remove commas and parse as float
+    return parseFloat(String(value).replace(/,/g, ''));
+}
+
 async function handleFormSubmit(e) {
     e.preventDefault();
 
     const formData = {
         symbol: document.getElementById('symbol').value,
-        lower_limit: parseFloat(document.getElementById('lower-limit').value),
-        upper_limit: parseFloat(document.getElementById('upper-limit').value),
-        capital: parseFloat(document.getElementById('capital').value),
+        lower_limit: parseFormattedNumber(document.getElementById('lower-limit').value),
+        upper_limit: parseFormattedNumber(document.getElementById('upper-limit').value),
+        capital: parseFormattedNumber(document.getElementById('capital').value),
         lookback_days: parseInt(document.getElementById('lookback-days').value),
         max_grids: parseInt(document.getElementById('max-grids').value)
     };
@@ -474,6 +518,14 @@ function formatNumber(num, decimals = 2) {
     return num.toLocaleString('en-US', {
         minimumFractionDigits: decimals,
         maximumFractionDigits: decimals
+    });
+}
+
+function formatNumberInput(num) {
+    if (num === null || num === undefined || isNaN(num)) return '';
+    return num.toLocaleString('en-US', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2
     });
 }
 
