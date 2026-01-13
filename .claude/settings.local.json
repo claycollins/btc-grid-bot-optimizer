@@ -9,7 +9,13 @@
       "Bash(git init:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(gh auth status:*)",
+      "Bash(tar:*)",
+      "Bash(/tmp/gh_2.63.2_macOS_amd64/bin/gh:*)",
+      "Bash(/tmp/gh_2.63.2_macOS_arm64/bin/gh:*)",
+      "Bash(unzip:*)",
+      "Bash(git push:*)"
     ]
   }
 }
