@@ -107,10 +107,11 @@ def fetch_historical_klines(
     interval: str = DEFAULT_INTERVAL,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     verbose: bool = True,
-    progress_callback=None
+    progress_callback=None,
+    use_cache: bool = True
 ) -> pd.DataFrame:
     """
-    Fetch historical kline data from ASTeRDEX with pagination support.
+    Fetch historical kline data from ASTeRDEX with caching and pagination support.
 
     Parameters:
     -----------
@@ -124,16 +125,25 @@ def fetch_historical_klines(
         Print progress information
     progress_callback : callable, optional
         Callback function for progress updates (receives percent, message)
+    use_cache : bool
+        Whether to use the local cache (default True)
 
     Returns:
     --------
     pd.DataFrame : Cleaned OHLCV data with columns:
                    ['timestamp', 'open', 'high', 'low', 'close', 'volume']
     """
+    # Import cache module
+    try:
+        import candle_cache as cache
+    except ImportError:
+        use_cache = False
+
     if verbose:
         print(f"\n{'='*60}")
         print(f"Fetching {symbol} {interval} data from ASTeRDEX...")
         print(f"Lookback period: {lookback_days} days")
+        print(f"Cache: {'enabled' if use_cache else 'disabled'}")
         print(f"{'='*60}\n")
 
     # Calculate time range
@@ -142,72 +152,117 @@ def fetch_historical_klines(
 
     # For 1-minute candles, each candle is 60000 ms
     interval_ms = 60000  # 1 minute in milliseconds
-    total_candles_needed = lookback_days * 24 * 60
 
-    if verbose:
-        print(f"Expected candles: ~{total_candles_needed:,}")
+    # Check cache first
+    cached_df = pd.DataFrame()
+    missing_ranges = [(start_time, end_time)]
 
-    all_klines = []
-    current_start = start_time
-    batch_num = 0
-    total_batches_estimate = max(1, (end_time - start_time) // (MAX_LIMIT_PER_REQUEST * interval_ms) + 1)
+    if use_cache:
+        if progress_callback:
+            progress_callback(5, "Checking cache...")
 
-    while current_start < end_time:
-        batch_num += 1
-        batch_end = min(current_start + (MAX_LIMIT_PER_REQUEST * interval_ms), end_time)
+        # Get what we already have cached
+        cached_df = cache.get_cached_candles(symbol, interval, start_time, end_time)
+
+        if not cached_df.empty:
+            if verbose:
+                print(f"Found {len(cached_df):,} cached candles")
+
+        # Determine what ranges we need to fetch
+        missing_ranges = cache.get_missing_ranges(symbol, interval, start_time, end_time)
+
+        if not missing_ranges:
+            if verbose:
+                print("All data available from cache!")
+            if progress_callback:
+                progress_callback(40, "Loaded from cache")
+            return cached_df
 
         if verbose:
-            print(f"  Batch {batch_num}: Fetching from {datetime.fromtimestamp(current_start/1000).strftime('%Y-%m-%d %H:%M')}...")
+            print(f"Need to fetch {len(missing_ranges)} range(s) from API")
 
-        if progress_callback:
-            progress = min(40, int((batch_num / total_batches_estimate) * 40))
-            progress_callback(progress, f"Fetching data batch {batch_num}...")
+    # Fetch missing ranges from API
+    all_klines = []
+    total_ranges = len(missing_ranges)
 
-        klines = fetch_klines_batch(symbol, interval, current_start, batch_end)
+    for range_idx, (range_start, range_end) in enumerate(missing_ranges):
+        current_start = range_start
+        batch_num = 0
+        total_batches_estimate = max(1, (range_end - range_start) // (MAX_LIMIT_PER_REQUEST * interval_ms) + 1)
 
-        if not klines:
+        while current_start < range_end:
+            batch_num += 1
+            batch_end = min(current_start + (MAX_LIMIT_PER_REQUEST * interval_ms), range_end)
+
             if verbose:
-                print(f"  [WARNING] Empty response for batch {batch_num}")
-            break
+                print(f"  Range {range_idx + 1}/{total_ranges}, Batch {batch_num}: Fetching from {datetime.fromtimestamp(current_start/1000).strftime('%Y-%m-%d %H:%M')}...")
 
-        all_klines.extend(klines)
+            if progress_callback:
+                overall_progress = (range_idx / total_ranges) + (batch_num / total_batches_estimate / total_ranges)
+                progress = 5 + min(35, int(overall_progress * 35))
+                progress_callback(progress, f"Fetching data batch {batch_num}...")
 
-        # Move start time to after the last received candle
-        if klines:
-            last_open_time = klines[-1][0]
-            current_start = last_open_time + interval_ms
-        else:
-            break
+            klines = fetch_klines_batch(symbol, interval, current_start, batch_end)
 
-        # Rate limiting - be respectful to the API
-        time.sleep(0.1)
+            if not klines:
+                if verbose:
+                    print(f"  [WARNING] Empty response for batch {batch_num}")
+                break
 
-    if not all_klines:
-        print("[ERROR] No kline data received from API")
+            all_klines.extend(klines)
+
+            # Move start time to after the last received candle
+            if klines:
+                last_open_time = klines[-1][0]
+                current_start = last_open_time + interval_ms
+            else:
+                break
+
+            # Rate limiting - be respectful to the API
+            time.sleep(0.1)
+
+    # Parse newly fetched kline data
+    new_df = pd.DataFrame()
+    if all_klines:
+        if verbose:
+            print(f"\nTotal raw klines fetched from API: {len(all_klines):,}")
+
+        # Response format: [open_time, open, high, low, close, volume, close_time,
+        #                   quote_volume, trades, taker_buy_base, taker_buy_quote, ignore]
+        new_df = pd.DataFrame(all_klines, columns=[
+            'open_time', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+            'taker_buy_quote', 'ignore'
+        ])
+
+        # Clean and convert data types
+        new_df['timestamp'] = pd.to_datetime(new_df['open_time'], unit='ms')
+        new_df['open'] = pd.to_numeric(new_df['open'], errors='coerce')
+        new_df['high'] = pd.to_numeric(new_df['high'], errors='coerce')
+        new_df['low'] = pd.to_numeric(new_df['low'], errors='coerce')
+        new_df['close'] = pd.to_numeric(new_df['close'], errors='coerce')
+        new_df['volume'] = pd.to_numeric(new_df['volume'], errors='coerce')
+
+        # Keep only essential columns
+        new_df = new_df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+
+        # Save to cache
+        if use_cache and not new_df.empty:
+            if verbose:
+                print("Saving to cache...")
+            cache.save_candles(symbol, interval, new_df, start_time, end_time)
+
+    # Combine cached and new data
+    if not cached_df.empty and not new_df.empty:
+        df = pd.concat([cached_df, new_df], ignore_index=True)
+    elif not cached_df.empty:
+        df = cached_df
+    elif not new_df.empty:
+        df = new_df
+    else:
+        if verbose:
+            print("[ERROR] No kline data available")
         return pd.DataFrame()
-
-    if verbose:
-        print(f"\nTotal raw klines fetched: {len(all_klines):,}")
-
-    # Parse kline data into DataFrame
-    # Response format: [open_time, open, high, low, close, volume, close_time,
-    #                   quote_volume, trades, taker_buy_base, taker_buy_quote, ignore]
-    df = pd.DataFrame(all_klines, columns=[
-        'open_time', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_volume', 'trades', 'taker_buy_base',
-        'taker_buy_quote', 'ignore'
-    ])
-
-    # Clean and convert data types
-    df['timestamp'] = pd.to_datetime(df['open_time'], unit='ms')
-    df['open'] = pd.to_numeric(df['open'], errors='coerce')
-    df['high'] = pd.to_numeric(df['high'], errors='coerce')
-    df['low'] = pd.to_numeric(df['low'], errors='coerce')
-    df['close'] = pd.to_numeric(df['close'], errors='coerce')
-    df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
-
-    # Keep only essential columns
-    df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
 
     # Sort by time and remove duplicates
     df = df.sort_values('timestamp').drop_duplicates(subset='timestamp').reset_index(drop=True)
