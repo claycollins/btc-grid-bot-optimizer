@@ -477,5 +477,15 @@ function formatNumber(num, decimals = 2) {
     });
 }
 
-// Global function for reset button
+function downloadCandles() {
+    if (!state.currentJobId) {
+        alert('No optimization data available');
+        return;
+    }
+
+    window.location.href = `${API_BASE}/api/download/${state.currentJobId}/candles`;
+}
+
+// Global functions
 window.resetUI = resetUI;
+window.downloadCandles = downloadCandles;
