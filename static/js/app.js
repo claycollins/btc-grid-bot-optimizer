@@ -529,13 +529,26 @@ function formatNumberInput(num) {
     });
 }
 
-function downloadCandles() {
+async function downloadCandles() {
     if (!state.currentJobId) {
-        alert('No optimization data available');
+        alert('No optimization data available. Please run an optimization first.');
         return;
     }
 
-    window.location.href = `${API_BASE}/api/download/${state.currentJobId}/candles`;
+    // Check if job still exists on server before downloading
+    try {
+        const response = await fetch(`${API_BASE}/api/status/${state.currentJobId}`);
+        const data = await response.json();
+
+        if (!data.success || data.status !== 'completed') {
+            alert('Download not available. The optimization data has expired. Please run a new optimization.');
+            return;
+        }
+
+        window.location.href = `${API_BASE}/api/download/${state.currentJobId}/candles`;
+    } catch (error) {
+        alert('Download not available. Please run a new optimization.');
+    }
 }
 
 // Global functions
