@@ -216,14 +216,14 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 if isinstance(v, float) and (v != v):  # NaN check
                     r[k] = 0
 
-        # Store candle data for download
+        # Prepare candle data for client-side download
         candle_data = df.copy()
         candle_data['timestamp'] = candle_data['timestamp'].astype(str)
+        candle_records = candle_data.to_dict('records')
 
         jobs[job_id]['status'] = 'completed'
         jobs[job_id]['progress'] = 100
         jobs[job_id]['message'] = 'Optimization complete!'
-        jobs[job_id]['candle_data'] = candle_data.to_dict('records')
         jobs[job_id]['result'] = {
             'data_info': data_info,
             'optimal': {
@@ -237,7 +237,8 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 'daily_roi': float(optimal['daily_roi']) if optimal['daily_roi'] == optimal['daily_roi'] else 0
             },
             'all_results': all_results,
-            'top_results': all_results[:20]
+            'top_results': all_results[:20],
+            'candle_data': candle_records
         }
 
     except Exception as e:
@@ -271,41 +272,6 @@ def get_job_status(job_id):
         response['error'] = job['error']
 
     return jsonify(response)
-
-
-@app.route('/api/download/<job_id>/candles', methods=['GET'])
-def download_candles(job_id):
-    """Download candle data as CSV."""
-    if job_id not in jobs:
-        return jsonify({
-            'success': False,
-            'error': 'Job not found'
-        }), 404
-
-    job = jobs[job_id]
-
-    if job['status'] != 'completed' or 'candle_data' not in job:
-        return jsonify({
-            'success': False,
-            'error': 'Candle data not available'
-        }), 400
-
-    import io
-    import pandas as pd
-    from flask import Response
-
-    df = pd.DataFrame(job['candle_data'])
-    csv_buffer = io.StringIO()
-    df.to_csv(csv_buffer, index=False)
-
-    symbol = job['params']['symbol']
-    filename = f"{symbol}_candles_{job_id}.csv"
-
-    return Response(
-        csv_buffer.getvalue(),
-        mimetype='text/csv',
-        headers={'Content-Disposition': f'attachment; filename={filename}'}
-    )
 
 
 @app.route('/api/health', methods=['GET'])

@@ -13,6 +13,7 @@ const state = {
     profitChart: null,
     tradesChart: null,
     allResults: [],
+    candleData: [],  // Store candle data for client-side CSV download
     sortColumn: 'total_profit',
     sortDirection: 'desc'
 };
@@ -290,6 +291,9 @@ function displayResults(result) {
     // Store all results for sorting
     state.allResults = result.all_results;
 
+    // Store candle data for CSV download (cleared after download to save memory)
+    state.candleData = result.candle_data || [];
+
     // Show results panel
     document.getElementById('results-placeholder').style.display = 'none';
     document.getElementById('error-message').style.display = 'none';
@@ -529,26 +533,34 @@ function formatNumberInput(num) {
     });
 }
 
-async function downloadCandles() {
-    if (!state.currentJobId) {
-        alert('No optimization data available. Please run an optimization first.');
+function downloadCandles() {
+    if (!state.candleData || state.candleData.length === 0) {
+        alert('No candle data available. Please run an optimization first.');
         return;
     }
 
-    // Check if job still exists on server before downloading
-    try {
-        const response = await fetch(`${API_BASE}/api/status/${state.currentJobId}`);
-        const data = await response.json();
+    // Generate CSV content client-side
+    const headers = ['timestamp', 'open', 'high', 'low', 'close', 'volume'];
+    const csvRows = [headers.join(',')];
 
-        if (!data.success || data.status !== 'completed') {
-            alert('Download not available. The optimization data has expired. Please run a new optimization.');
-            return;
-        }
-
-        window.location.href = `${API_BASE}/api/download/${state.currentJobId}/candles`;
-    } catch (error) {
-        alert('Download not available. Please run a new optimization.');
+    for (const candle of state.candleData) {
+        const row = headers.map(h => candle[h] ?? '').join(',');
+        csvRows.push(row);
     }
+
+    const csvContent = csvRows.join('\n');
+
+    // Create blob and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `candles_${document.getElementById('symbol').value}_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
 
 // Global functions
