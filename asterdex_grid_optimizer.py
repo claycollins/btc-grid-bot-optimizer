@@ -17,6 +17,13 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import warnings
 
+# Import database module for caching
+try:
+    import candle_db
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+
 warnings.filterwarnings('ignore')
 
 # =============================================================================
@@ -225,6 +232,112 @@ def fetch_historical_klines(
         print(f"Price range: ${df['low'].min():,.2f} - ${df['high'].max():,.2f}")
 
     return df
+
+
+def fetch_historical_klines_cached(
+    symbol: str = DEFAULT_SYMBOL,
+    interval: str = DEFAULT_INTERVAL,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    verbose: bool = True,
+    progress_callback=None
+) -> pd.DataFrame:
+    """
+    Fetch historical kline data with PostgreSQL caching.
+    Checks DB first, only fetches missing data from API.
+
+    Parameters are same as fetch_historical_klines.
+    """
+    if not DB_AVAILABLE or not candle_db.DATABASE_URL:
+        # Fallback to direct API fetch if DB not available
+        if verbose:
+            print("[INFO] Database not configured, fetching from API...")
+        return fetch_historical_klines(symbol, interval, lookback_days, verbose, progress_callback)
+
+    # Calculate time range
+    end_time = datetime.now()
+    start_time = end_time - timedelta(days=lookback_days)
+
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"Fetching {symbol} {interval} data (with caching)...")
+        print(f"Lookback period: {lookback_days} days")
+        print(f"{'='*60}\n")
+
+    if progress_callback:
+        progress_callback(5, "Checking cached data...")
+
+    # Check what we have cached
+    cached_df = candle_db.get_cached_candles(symbol, start_time, end_time)
+    cached_count = len(cached_df)
+
+    if verbose:
+        print(f"Found {cached_count:,} cached candles")
+
+    # Calculate expected candles
+    expected_candles = lookback_days * 24 * 60
+
+    # If we have most of the data cached (>95%), just use it
+    if cached_count >= expected_candles * 0.95:
+        if verbose:
+            print(f"Using cached data ({cached_count:,} candles)")
+        if progress_callback:
+            progress_callback(40, "Using cached data...")
+        return cached_df
+
+    # Find missing ranges and fetch from API
+    missing_ranges = candle_db.get_missing_ranges(symbol, start_time, end_time)
+
+    if verbose:
+        print(f"Missing ranges: {len(missing_ranges)}")
+
+    all_new_data = []
+    for i, (range_start, range_end) in enumerate(missing_ranges):
+        range_days = (range_end - range_start).days + 1
+        if verbose:
+            print(f"Fetching missing range {i+1}: {range_start} to {range_end}")
+
+        if progress_callback:
+            progress_callback(10 + int((i / max(len(missing_ranges), 1)) * 30),
+                            f"Fetching missing data ({i+1}/{len(missing_ranges)})...")
+
+        # Fetch the missing range
+        new_df = fetch_historical_klines(
+            symbol=symbol,
+            interval=interval,
+            lookback_days=range_days,
+            verbose=False,
+            progress_callback=None
+        )
+
+        if not new_df.empty:
+            # Filter to just the range we need
+            new_df = new_df[(new_df['timestamp'] >= range_start) &
+                           (new_df['timestamp'] <= range_end)]
+            all_new_data.append(new_df)
+
+            # Save to database
+            candle_db.save_candles(symbol, new_df)
+
+    # Combine cached and new data
+    if all_new_data:
+        new_combined = pd.concat(all_new_data, ignore_index=True)
+        if cached_count > 0:
+            final_df = pd.concat([cached_df, new_combined], ignore_index=True)
+        else:
+            final_df = new_combined
+    else:
+        final_df = cached_df
+
+    # Clean up: sort and deduplicate
+    final_df = final_df.sort_values('timestamp').drop_duplicates(
+        subset='timestamp').reset_index(drop=True)
+
+    if verbose:
+        print(f"Total candles after merge: {len(final_df):,}")
+        if len(final_df) > 0:
+            print(f"Date range: {final_df['timestamp'].min()} to {final_df['timestamp'].max()}")
+
+    return final_df
 
 
 def get_current_price(symbol: str = DEFAULT_SYMBOL) -> float:

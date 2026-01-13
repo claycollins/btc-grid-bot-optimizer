@@ -13,7 +13,8 @@ const state = {
     profitChart: null,
     tradesChart: null,
     allResults: [],
-    candleData: [],  // Store candle data for client-side CSV download
+    lastSymbol: 'BTCUSDT',      // Track last optimization params for CSV download
+    lastLookbackDays: 30,
     sortColumn: 'total_profit',
     sortDirection: 'desc'
 };
@@ -184,6 +185,10 @@ async function handleFormSubmit(e) {
         return;
     }
 
+    // Save params for CSV download
+    state.lastSymbol = formData.symbol;
+    state.lastLookbackDays = formData.lookback_days;
+
     // Start optimization
     setLoadingState(true);
 
@@ -290,9 +295,6 @@ function resetUI() {
 function displayResults(result) {
     // Store all results for sorting
     state.allResults = result.all_results;
-
-    // Store candle data for CSV download (cleared after download to save memory)
-    state.candleData = result.candle_data || [];
 
     // Show results panel
     document.getElementById('results-placeholder').style.display = 'none';
@@ -534,33 +536,14 @@ function formatNumberInput(num) {
 }
 
 function downloadCandles() {
-    if (!state.candleData || state.candleData.length === 0) {
-        alert('No candle data available. Please run an optimization first.');
+    if (!state.lastSymbol) {
+        alert('No optimization has been run yet. Please run an optimization first.');
         return;
     }
 
-    // Generate CSV content client-side
-    const headers = ['timestamp', 'open', 'high', 'low', 'close', 'volume'];
-    const csvRows = [headers.join(',')];
-
-    for (const candle of state.candleData) {
-        const row = headers.map(h => candle[h] ?? '').join(',');
-        csvRows.push(row);
-    }
-
-    const csvContent = csvRows.join('\n');
-
-    // Create blob and trigger download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `candles_${document.getElementById('symbol').value}_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // Download from server (data is stored in PostgreSQL)
+    const url = `${API_BASE}/api/download/candles?symbol=${state.lastSymbol}&lookback_days=${state.lastLookbackDays}`;
+    window.location.href = url;
 }
 
 // Global functions

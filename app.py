@@ -8,15 +8,29 @@ Flask backend serving REST API for the grid optimization engine.
 import os
 import uuid
 import threading
-from datetime import datetime
-from flask import Flask, render_template, jsonify, request
+import io
+import csv
+from datetime import datetime, timedelta
+from flask import Flask, render_template, jsonify, request, Response
+
 from flask_cors import CORS
 
 # Import the optimizer module
 import asterdex_grid_optimizer as optimizer
 
+# Import database module
+try:
+    import candle_db
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+
 app = Flask(__name__)
 CORS(app)
+
+# Initialize database on startup
+if DB_AVAILABLE:
+    candle_db.init_db()
 
 # In-memory job storage (for local use)
 jobs = {}
@@ -161,15 +175,25 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 jobs[job_id]['progress'] = percent
                 jobs[job_id]['message'] = message
 
-        # Fetch historical data
+        # Fetch historical data (use cached version if DB available)
         progress_callback(5, 'Fetching historical data...')
-        df = optimizer.fetch_historical_klines(
-            symbol=symbol,
-            interval='1m',
-            lookback_days=lookback_days,
-            verbose=False,
-            progress_callback=progress_callback
-        )
+
+        if DB_AVAILABLE and candle_db.DATABASE_URL:
+            df = optimizer.fetch_historical_klines_cached(
+                symbol=symbol,
+                interval='1m',
+                lookback_days=lookback_days,
+                verbose=False,
+                progress_callback=progress_callback
+            )
+        else:
+            df = optimizer.fetch_historical_klines(
+                symbol=symbol,
+                interval='1m',
+                lookback_days=lookback_days,
+                verbose=False,
+                progress_callback=progress_callback
+            )
 
         if df.empty:
             jobs[job_id]['status'] = 'failed'
@@ -216,11 +240,6 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 if isinstance(v, float) and (v != v):  # NaN check
                     r[k] = 0
 
-        # Prepare candle data for client-side download
-        candle_data = df.copy()
-        candle_data['timestamp'] = candle_data['timestamp'].astype(str)
-        candle_records = candle_data.to_dict('records')
-
         jobs[job_id]['status'] = 'completed'
         jobs[job_id]['progress'] = 100
         jobs[job_id]['message'] = 'Optimization complete!'
@@ -237,8 +256,8 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 'daily_roi': float(optimal['daily_roi']) if optimal['daily_roi'] == optimal['daily_roi'] else 0
             },
             'all_results': all_results,
-            'top_results': all_results[:20],
-            'candle_data': candle_records
+            'top_results': all_results[:20]
+            # Note: candle_data removed - download from DB via /api/download endpoint
         }
 
     except Exception as e:
@@ -274,12 +293,55 @@ def get_job_status(job_id):
     return jsonify(response)
 
 
+@app.route('/api/download/candles', methods=['GET'])
+def download_candles():
+    """Download candle data as CSV from the database."""
+    symbol = request.args.get('symbol', 'BTCUSDT').upper().replace('/', '')
+    lookback_days = int(request.args.get('lookback_days', 30))
+
+    if not DB_AVAILABLE or not candle_db.DATABASE_URL:
+        return jsonify({
+            'success': False,
+            'error': 'Database not configured'
+        }), 500
+
+    # Calculate time range
+    end_time = datetime.now()
+    start_time = end_time - timedelta(days=lookback_days)
+
+    # Get candles from database
+    candles = candle_db.get_candles_for_download(symbol, start_time, end_time)
+
+    if not candles:
+        return jsonify({
+            'success': False,
+            'error': 'No candle data found. Please run an optimization first.'
+        }), 404
+
+    # Generate CSV
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    writer.writeheader()
+    writer.writerows(candles)
+
+    # Create response
+    csv_content = output.getvalue()
+    filename = f"candles_{symbol}_{datetime.now().strftime('%Y%m%d')}.csv"
+
+    return Response(
+        csv_content,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename={filename}'}
+    )
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint."""
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'database': 'connected' if (DB_AVAILABLE and candle_db.DATABASE_URL) else 'not configured'
     })
 
 
