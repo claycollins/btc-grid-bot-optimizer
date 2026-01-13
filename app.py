@@ -317,44 +317,6 @@ def health_check():
     })
 
 
-@app.route('/api/cache/stats', methods=['GET'])
-def get_cache_stats():
-    """Get cache statistics."""
-    try:
-        import candle_cache as cache
-        stats = cache.get_cache_stats()
-        return jsonify({
-            'success': True,
-            **stats
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
-@app.route('/api/cache/clear', methods=['POST'])
-def clear_cache():
-    """Clear the candle cache."""
-    try:
-        import candle_cache as cache
-        data = request.get_json() or {}
-        symbol = data.get('symbol')  # Optional: clear only specific symbol
-
-        cache.clear_cache(symbol)
-
-        return jsonify({
-            'success': True,
-            'message': f'Cache cleared' + (f' for {symbol}' if symbol else ' completely')
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
-
 # =============================================================================
 # MAIN
 # =============================================================================

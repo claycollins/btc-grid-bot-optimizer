@@ -15,8 +15,6 @@ build/
 .env.local
 *.csv
 *.log
-*.db
-candle_cache.db
 .DS_Store
 .idea/
 .vscode/
