@@ -22,15 +22,27 @@ import asterdex_grid_optimizer as optimizer
 try:
     import candle_db
     DB_AVAILABLE = True
-except ImportError:
+    print("[APP] Database module loaded successfully")
+except ImportError as e:
     DB_AVAILABLE = False
+    print(f"[APP] Database module not available: {e}")
 
 app = Flask(__name__)
 CORS(app)
 
 # Initialize database on startup
 if DB_AVAILABLE:
-    candle_db.init_db()
+    if candle_db.DATABASE_URL:
+        print("[APP] DATABASE_URL is set, initializing database...")
+        db_init_success = candle_db.init_db()
+        if db_init_success:
+            print("[APP] Database ready for caching")
+        else:
+            print("[APP] Database initialization failed - falling back to API-only mode")
+    else:
+        print("[APP] No DATABASE_URL found - running in API-only mode (no caching)")
+else:
+    print("[APP] Running without database support")
 
 # In-memory job storage (for local use)
 jobs = {}
@@ -178,8 +190,17 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
         # Fetch historical data (use cached version if DB available)
         progress_callback(5, 'Fetching historical data...')
 
+        # Default cache stats for API-only mode
+        cache_stats = {
+            'cached_count': 0,
+            'api_count': 0,
+            'total_count': 0,
+            'cache_percent': 0,
+            'source': 'api_only'
+        }
+
         if DB_AVAILABLE and candle_db.DATABASE_URL:
-            df = optimizer.fetch_historical_klines_cached(
+            df, cache_stats = optimizer.fetch_historical_klines_cached(
                 symbol=symbol,
                 interval='1m',
                 lookback_days=lookback_days,
@@ -194,19 +215,22 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 verbose=False,
                 progress_callback=progress_callback
             )
+            cache_stats['api_count'] = len(df)
+            cache_stats['total_count'] = len(df)
 
         if df.empty:
             jobs[job_id]['status'] = 'failed'
             jobs[job_id]['error'] = 'Failed to fetch historical data'
             return
 
-        # Get data info
+        # Get data info including cache stats
         data_info = {
             'total_candles': len(df),
             'date_start': df['timestamp'].min().strftime('%Y-%m-%d %H:%M'),
             'date_end': df['timestamp'].max().strftime('%Y-%m-%d %H:%M'),
             'price_low': float(df['low'].min()),
-            'price_high': float(df['high'].max())
+            'price_high': float(df['high'].max()),
+            'cache_stats': cache_stats
         }
 
         progress_callback(45, 'Running optimization...')
@@ -256,8 +280,10 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 'daily_roi': float(optimal['daily_roi']) if optimal['daily_roi'] == optimal['daily_roi'] else 0
             },
             'all_results': all_results,
-            'top_results': all_results[:20]
-            # Note: candle_data removed - download from DB via /api/download endpoint
+            'top_results': all_results[:20],
+            'candle_data': df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].assign(
+                timestamp=df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+            ).to_dict('records')
         }
 
     except Exception as e:
@@ -295,15 +321,16 @@ def get_job_status(job_id):
 
 @app.route('/api/download/candles', methods=['GET'])
 def download_candles():
-    """Download candle data as CSV from the database."""
+    """Download candle data as CSV from the database (legacy endpoint)."""
     symbol = request.args.get('symbol', 'BTCUSDT').upper().replace('/', '')
     lookback_days = int(request.args.get('lookback_days', 30))
 
     if not DB_AVAILABLE or not candle_db.DATABASE_URL:
         return jsonify({
             'success': False,
-            'error': 'Database not configured'
-        }), 500
+            'error': 'CSV download is now handled client-side. Please run an optimization and use the Download button on the results page.',
+            'hint': 'If you are seeing this in the browser, please refresh the page to get the latest version.'
+        }), 400
 
     # Calculate time range
     end_time = datetime.now()
@@ -337,12 +364,88 @@ def download_candles():
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint with database diagnostics."""
+    db_status = {
+        'configured': bool(DB_AVAILABLE and candle_db.DATABASE_URL),
+        'connected': False,
+        'table_exists': False,
+        'row_count': 0
+    }
+
+    if db_status['configured']:
+        try:
+            conn = candle_db.get_connection()
+            if conn:
+                db_status['connected'] = True
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_name = 'candles'
+                        )
+                    """)
+                    db_status['table_exists'] = cur.fetchone()[0]
+
+                    if db_status['table_exists']:
+                        cur.execute("SELECT COUNT(*) FROM candles")
+                        db_status['row_count'] = cur.fetchone()[0]
+                conn.close()
+        except Exception as e:
+            db_status['error'] = str(e)
+
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'database': 'connected' if (DB_AVAILABLE and candle_db.DATABASE_URL) else 'not configured'
+        'database': db_status
     })
+
+
+@app.route('/api/db/init', methods=['POST'])
+def init_database():
+    """Manually initialize/reinitialize the database."""
+    if not DB_AVAILABLE:
+        return jsonify({
+            'success': False,
+            'error': 'Database module not available'
+        }), 500
+
+    if not candle_db.DATABASE_URL:
+        # List environment variables that might contain DB URL (for debugging)
+        db_vars = ['DATABASE_URL', 'DATABASE_PRIVATE_URL', 'POSTGRES_URL', 'POSTGRESQL_URL', 'PGHOST']
+        found_vars = {var: bool(os.environ.get(var)) for var in db_vars}
+        return jsonify({
+            'success': False,
+            'error': 'No database URL configured',
+            'env_vars_checked': found_vars
+        }), 500
+
+    try:
+        success = candle_db.init_db()
+        if success:
+            # Get row count
+            conn = candle_db.get_connection()
+            row_count = 0
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM candles")
+                    row_count = cur.fetchone()[0]
+                conn.close()
+
+            return jsonify({
+                'success': True,
+                'message': 'Database initialized successfully',
+                'row_count': row_count
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Database initialization failed - check server logs'
+            }), 500
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 # =============================================================================

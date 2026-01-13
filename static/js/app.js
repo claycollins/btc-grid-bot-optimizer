@@ -13,6 +13,7 @@ const state = {
     profitChart: null,
     tradesChart: null,
     allResults: [],
+    candleData: [],             // Store candle data for CSV download
     lastSymbol: 'BTCUSDT',      // Track last optimization params for CSV download
     lastLookbackDays: 30,
     sortColumn: 'total_profit',
@@ -296,6 +297,9 @@ function displayResults(result) {
     // Store all results for sorting
     state.allResults = result.all_results;
 
+    // Store candle data for CSV download
+    state.candleData = result.candle_data || [];
+
     // Show results panel
     document.getElementById('results-placeholder').style.display = 'none';
     document.getElementById('error-message').style.display = 'none';
@@ -315,6 +319,35 @@ function displayResults(result) {
     document.getElementById('data-range').textContent = `${info.date_start} to ${info.date_end}`;
     document.getElementById('data-candles').textContent = formatNumber(info.total_candles, 0);
     document.getElementById('data-prices').textContent = `$${formatNumber(info.price_low, 2)} - $${formatNumber(info.price_high, 2)}`;
+
+    // Update cache stats display
+    const cacheStatsItem = document.getElementById('cache-stats-item');
+    const dataSourceEl = document.getElementById('data-source');
+    if (info.cache_stats) {
+        const stats = info.cache_stats;
+        let sourceText = '';
+        let sourceClass = '';
+
+        if (stats.source === 'cache') {
+            sourceText = `100% from cache (${formatNumber(stats.cached_count, 0)} candles)`;
+            sourceClass = 'source-cache';
+        } else if (stats.source === 'api_only') {
+            sourceText = `100% from API (no database configured)`;
+            sourceClass = 'source-api';
+        } else if (stats.source === 'api') {
+            sourceText = `100% from API (${formatNumber(stats.api_count, 0)} candles fetched)`;
+            sourceClass = 'source-api';
+        } else if (stats.source === 'mixed') {
+            sourceText = `${stats.cache_percent}% cached, ${100 - stats.cache_percent}% from API`;
+            sourceClass = 'source-mixed';
+        }
+
+        dataSourceEl.textContent = sourceText;
+        dataSourceEl.className = sourceClass;
+        cacheStatsItem.style.display = 'inline';
+    } else {
+        cacheStatsItem.style.display = 'none';
+    }
 
     // Create charts
     createCharts(result.all_results, optimal.num_grids);
@@ -536,14 +569,34 @@ function formatNumberInput(num) {
 }
 
 function downloadCandles() {
-    if (!state.lastSymbol) {
-        alert('No optimization has been run yet. Please run an optimization first.');
+    if (!state.candleData || state.candleData.length === 0) {
+        alert('No candle data available. Please run an optimization first.');
         return;
     }
 
-    // Download from server (data is stored in PostgreSQL)
-    const url = `${API_BASE}/api/download/candles?symbol=${state.lastSymbol}&lookback_days=${state.lastLookbackDays}`;
-    window.location.href = url;
+    // Generate CSV content client-side
+    const headers = ['timestamp', 'open', 'high', 'low', 'close', 'volume'];
+    const csvRows = [headers.join(',')];
+
+    for (const candle of state.candleData) {
+        const row = headers.map(h => candle[h] ?? '').join(',');
+        csvRows.push(row);
+    }
+
+    const csvContent = csvRows.join('\n');
+
+    // Create blob and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = `candles_${state.lastSymbol}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
 
 // Global functions

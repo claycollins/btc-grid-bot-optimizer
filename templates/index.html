@@ -52,7 +52,7 @@
                     <div class="form-group">
                         <label for="capital">Trading Capital ($)</label>
                         <input type="number" id="capital" name="capital"
-                               value="10000" step="100" min="100" required>
+                               value="1000000" step="1000" min="100" required>
                     </div>
 
                     <!-- Lookback Period -->
@@ -137,6 +137,9 @@
                         <span class="info-item"><strong>Data:</strong> <span id="data-range">--</span></span>
                         <span class="info-item"><strong>Candles:</strong> <span id="data-candles">--</span></span>
                         <span class="info-item"><strong>Price Range:</strong> <span id="data-prices">--</span></span>
+                        <span class="info-item" id="cache-stats-item" style="display: none;">
+                            <strong>Source:</strong> <span id="data-source">--</span>
+                        </span>
                         <button class="btn-download" id="download-candles-btn" onclick="downloadCandles()">
                             Download Candles CSV
                         </button>
