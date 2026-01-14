@@ -279,10 +279,9 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 if isinstance(v, float) and (v != v):  # NaN check
                     r[k] = 0
 
-        jobs[job_id]['status'] = 'completed'
-        jobs[job_id]['progress'] = 100
-        jobs[job_id]['message'] = 'Optimization complete!'
-        jobs[job_id]['result'] = {
+        # Build result first, then set status to completed
+        # This prevents race condition where frontend sees completed but result is null
+        result_data = {
             'data_info': data_info,
             'optimal': {
                 'num_grids': int(optimal['num_grids']),
@@ -303,6 +302,12 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 timestamp=df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
             ).to_dict('records')
         }
+
+        # Now set result and status atomically
+        jobs[job_id]['result'] = result_data
+        jobs[job_id]['status'] = 'completed'
+        jobs[job_id]['progress'] = 100
+        jobs[job_id]['message'] = 'Optimization complete!'
 
     except Exception as e:
         jobs[job_id]['status'] = 'failed'
