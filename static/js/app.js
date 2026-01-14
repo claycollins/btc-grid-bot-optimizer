@@ -349,6 +349,26 @@ function displayResults(result) {
         cacheStatsItem.style.display = 'none';
     }
 
+    // Populate grid levels table
+    if (optimal.grid_levels && optimal.grid_levels.length > 0) {
+        const gridRangeLabel = document.getElementById('grid-range-label');
+        gridRangeLabel.textContent = `($${formatNumber(optimal.lower_limit, 0)} - $${formatNumber(optimal.upper_limit, 0)})`;
+
+        const gridLevelsTbody = document.getElementById('grid-levels-tbody');
+        gridLevelsTbody.innerHTML = optimal.grid_levels.map(level => `
+            <tr>
+                <td>${level.level}</td>
+                <td class="buy-price">$${formatNumber(level.buy_price, 2)}</td>
+                <td class="sell-price">$${formatNumber(level.sell_price, 2)}</td>
+                <td>$${formatNumber(level.profit_per_trade, 4)}</td>
+            </tr>
+        `).join('');
+
+        document.getElementById('grid-levels-container').style.display = 'block';
+    } else {
+        document.getElementById('grid-levels-container').style.display = 'none';
+    }
+
     // Create charts
     createCharts(result.all_results, optimal.num_grids);
 

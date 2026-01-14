@@ -255,6 +255,21 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
         # Get optimal configuration
         optimal = results_df.iloc[0]
 
+        # Calculate grid levels for the optimal configuration
+        num_grids = int(optimal['num_grids'])
+        spacing = float(optimal['spacing'])
+        grid_levels = []
+        for i in range(num_grids):
+            buy_price = lower_limit + i * spacing
+            sell_price = buy_price + spacing
+            profit_per_level = (capital / num_grids) * (spacing / buy_price)
+            grid_levels.append({
+                'level': i + 1,
+                'buy_price': round(buy_price, 2),
+                'sell_price': round(sell_price, 2),
+                'profit_per_trade': round(profit_per_level, 4)
+            })
+
         # Prepare response data
         all_results = results_df.to_dict('records')
 
@@ -277,7 +292,10 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 'roi_percent': float(optimal['roi_percent']),
                 'profit_per_trade': float(optimal['profit_per_trade']) if optimal['profit_per_trade'] == optimal['profit_per_trade'] else 0,
                 'trades_per_day': float(optimal['trades_per_day']) if optimal['trades_per_day'] == optimal['trades_per_day'] else 0,
-                'daily_roi': float(optimal['daily_roi']) if optimal['daily_roi'] == optimal['daily_roi'] else 0
+                'daily_roi': float(optimal['daily_roi']) if optimal['daily_roi'] == optimal['daily_roi'] else 0,
+                'lower_limit': lower_limit,
+                'upper_limit': upper_limit,
+                'grid_levels': grid_levels
             },
             'all_results': all_results,
             'top_results': all_results[:20],
