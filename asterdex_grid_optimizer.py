@@ -292,53 +292,73 @@ def fetch_historical_klines_cached(
     # Calculate expected candles
     expected_candles = lookback_days * 24 * 60
 
-    # If we have most of the data cached (>95%), just use it
-    if cached_count >= expected_candles * 0.95:
-        if verbose:
-            print(f"Using cached data ({cached_count:,} candles)")
-        if progress_callback:
-            progress_callback(40, "Using cached data...")
-        cache_stats['cached_count'] = cached_count
-        cache_stats['total_count'] = cached_count
-        cache_stats['cache_percent'] = 100
-        cache_stats['source'] = 'cache'
-        return cached_df, cache_stats
-
-    # Find missing ranges and fetch from API
-    missing_ranges = candle_db.get_missing_ranges(symbol, start_time, end_time)
-
-    if verbose:
-        print(f"Missing ranges: {len(missing_ranges)}")
+    # Always fetch recent data (last 2 hours) to ensure fresh candles
+    # This ensures we get new candles even if cache is mostly full
+    recent_cutoff = end_time - timedelta(hours=2)
 
     all_new_data = []
     api_fetched = 0
-    for i, (range_start, range_end) in enumerate(missing_ranges):
-        range_days = (range_end - range_start).days + 1
+
+    # If we have most of the data cached (>95%), only fetch recent data
+    if cached_count >= expected_candles * 0.95:
         if verbose:
-            print(f"Fetching missing range {i+1}: {range_start} to {range_end}")
-
+            print(f"Cache is >95% full, fetching only recent data (last 2 hours)")
         if progress_callback:
-            progress_callback(10 + int((i / max(len(missing_ranges), 1)) * 30),
-                            f"Fetching missing data ({i+1}/{len(missing_ranges)})...")
+            progress_callback(10, "Fetching recent candles...")
 
-        # Fetch the missing range
-        new_df = fetch_historical_klines(
+        # Fetch last 2 hours from API to get fresh data
+        recent_df = fetch_historical_klines(
             symbol=symbol,
             interval=interval,
-            lookback_days=range_days,
+            lookback_days=1,  # Fetch 1 day to ensure we get the recent data
             verbose=False,
             progress_callback=None
         )
 
-        if not new_df.empty:
-            # Filter to just the range we need
-            new_df = new_df[(new_df['timestamp'] >= range_start) &
-                           (new_df['timestamp'] <= range_end)]
-            all_new_data.append(new_df)
-            api_fetched += len(new_df)
+        if not recent_df.empty:
+            # Filter to just the recent period
+            recent_df = recent_df[recent_df['timestamp'] >= recent_cutoff]
+            if not recent_df.empty:
+                all_new_data.append(recent_df)
+                api_fetched = len(recent_df)
+                # Save new candles to database
+                candle_db.save_candles(symbol, recent_df)
+                if verbose:
+                    print(f"Fetched {len(recent_df)} recent candles from API")
+    else:
+        # Find missing ranges and fetch from API
+        missing_ranges = candle_db.get_missing_ranges(symbol, start_time, end_time)
 
-            # Save to database
-            candle_db.save_candles(symbol, new_df)
+        if verbose:
+            print(f"Missing ranges: {len(missing_ranges)}")
+
+        for i, (range_start, range_end) in enumerate(missing_ranges):
+            range_days = (range_end - range_start).days + 1
+            if verbose:
+                print(f"Fetching missing range {i+1}: {range_start} to {range_end}")
+
+            if progress_callback:
+                progress_callback(10 + int((i / max(len(missing_ranges), 1)) * 30),
+                                f"Fetching missing data ({i+1}/{len(missing_ranges)})...")
+
+            # Fetch the missing range
+            new_df = fetch_historical_klines(
+                symbol=symbol,
+                interval=interval,
+                lookback_days=range_days,
+                verbose=False,
+                progress_callback=None
+            )
+
+            if not new_df.empty:
+                # Filter to just the range we need
+                new_df = new_df[(new_df['timestamp'] >= range_start) &
+                               (new_df['timestamp'] <= range_end)]
+                all_new_data.append(new_df)
+                api_fetched += len(new_df)
+
+                # Save to database
+                candle_db.save_candles(symbol, new_df)
 
     # Combine cached and new data
     if all_new_data:

@@ -430,6 +430,78 @@ body {
     font-weight: 500;
 }
 
+/* Grid Levels Table */
+.grid-levels-container {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+}
+
+.grid-levels-container h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-md);
+}
+
+.grid-levels-container h3 span {
+    font-weight: 400;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.grid-levels-table-wrapper {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.grid-levels-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.grid-levels-table th,
+.grid-levels-table td {
+    padding: var(--spacing-sm) var(--spacing-md);
+    text-align: right;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.grid-levels-table th {
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-weight: 500;
+    position: sticky;
+    top: 0;
+}
+
+.grid-levels-table th:first-child,
+.grid-levels-table td:first-child {
+    text-align: center;
+    width: 60px;
+}
+
+.grid-levels-table td {
+    color: var(--text-primary);
+}
+
+.grid-levels-table .buy-price {
+    color: var(--accent-success);
+    font-weight: 500;
+}
+
+.grid-levels-table .sell-price {
+    color: var(--accent-danger);
+    font-weight: 500;
+}
+
+.grid-levels-table tbody tr:hover {
+    background-color: var(--bg-tertiary);
+}
+
 /* Charts */
 .charts-container {
     display: grid;
