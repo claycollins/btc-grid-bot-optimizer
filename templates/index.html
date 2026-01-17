@@ -195,6 +195,32 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- Trade Log -->
+                    <div class="trade-log-container" id="trade-log-container" style="display: none;">
+                        <h3>Trade Log <span id="trade-log-count"></span></h3>
+                        <div class="trade-log-controls">
+                            <button class="btn-filter active" data-filter="all">All</button>
+                            <button class="btn-filter" data-filter="BUY">Buys</button>
+                            <button class="btn-filter" data-filter="SELL">Sells</button>
+                            <button class="btn-download-trades" onclick="downloadTradeLog()">Download CSV</button>
+                        </div>
+                        <div class="trade-log-table-wrapper">
+                            <table class="trade-log-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date & Time</th>
+                                        <th>Type</th>
+                                        <th>Level</th>
+                                        <th>Price</th>
+                                        <th>Profit</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="trade-log-tbody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Error State -->

@@ -270,6 +270,17 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 'profit_per_trade': round(profit_per_level, 4)
             })
 
+        # Run detailed backtest for optimal config to get trade log
+        progress_callback(97, 'Generating trade log...')
+        detailed_result = optimizer.run_backtest_with_trades(
+            df=df,
+            num_grids=num_grids,
+            lower=lower_limit,
+            upper=upper_limit,
+            capital=capital
+        )
+        trade_log = detailed_result.get('trade_log', [])
+
         # Prepare response data
         all_results = results_df.to_dict('records')
 
@@ -279,10 +290,9 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
                 if isinstance(v, float) and (v != v):  # NaN check
                     r[k] = 0
 
-        jobs[job_id]['status'] = 'completed'
-        jobs[job_id]['progress'] = 100
-        jobs[job_id]['message'] = 'Optimization complete!'
-        jobs[job_id]['result'] = {
+        # Build result first, then set status to completed
+        # This prevents race condition where frontend sees completed but result is null
+        result_data = {
             'data_info': data_info,
             'optimal': {
                 'num_grids': int(optimal['num_grids']),
@@ -299,10 +309,17 @@ def run_optimization_job(job_id, symbol, lower_limit, upper_limit, capital, look
             },
             'all_results': all_results,
             'top_results': all_results[:20],
+            'trade_log': trade_log,
             'candle_data': df[['timestamp', 'open', 'high', 'low', 'close', 'volume']].assign(
                 timestamp=df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
             ).to_dict('records')
         }
+
+        # Now set result and status atomically
+        jobs[job_id]['result'] = result_data
+        jobs[job_id]['status'] = 'completed'
+        jobs[job_id]['progress'] = 100
+        jobs[job_id]['message'] = 'Optimization complete!'
 
     except Exception as e:
         jobs[job_id]['status'] = 'failed'

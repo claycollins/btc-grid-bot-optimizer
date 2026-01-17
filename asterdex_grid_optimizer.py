@@ -534,6 +534,146 @@ def run_backtest_grids(
     }
 
 
+def run_backtest_with_trades(
+    df: pd.DataFrame,
+    num_grids: int,
+    lower: float,
+    upper: float,
+    capital: float = 10000
+) -> Dict:
+    """
+    Run a detailed backtest that logs each individual trade with timestamps.
+    Use this only for the optimal configuration (not during optimization).
+
+    Returns:
+    --------
+    Dict : Backtest results including detailed trade_log
+    """
+    if num_grids < 2:
+        return {
+            'num_grids': num_grids,
+            'spacing': 0,
+            'total_trades': 0,
+            'total_profit': 0,
+            'roi_percent': 0,
+            'trade_log': []
+        }
+
+    # Setup Grid Levels
+    rng = upper - lower
+    spacing = rng / num_grids
+
+    buy_levels = np.array([lower + i * spacing for i in range(num_grids)])
+    sell_levels = buy_levels + spacing
+
+    per_grid_capital = capital / num_grids
+
+    # State Initialization
+    positions = np.zeros(num_grids, dtype=bool)
+
+    # Track buy prices for each position to calculate profit on sell
+    position_buy_prices = np.zeros(num_grids)
+
+    # If price starts below a grid, we assume we bought it immediately at open
+    start_price = df.iloc[0]['open']
+    initial_positions = buy_levels < start_price
+    positions[initial_positions] = True
+    position_buy_prices[initial_positions] = buy_levels[initial_positions]
+
+    total_profit = 0.0
+    trade_count = 0
+    trade_log = []
+
+    # Pre-calculate profit per successful swing for each level
+    level_profits = per_grid_capital * (spacing / buy_levels)
+
+    # Get timestamps
+    timestamps = df['timestamp'].values if 'timestamp' in df.columns else df.index.values
+    opens = df['open'].values
+    highs = df['high'].values
+    lows = df['low'].values
+    closes = df['close'].values
+
+    for i in range(len(df)):
+        O, H, L, C = opens[i], highs[i], lows[i], closes[i]
+        ts = timestamps[i]
+
+        # Convert timestamp to string if it's a datetime
+        if hasattr(ts, 'strftime'):
+            ts_str = ts.strftime('%Y-%m-%d %H:%M')
+        else:
+            ts_str = str(ts)
+
+        if C >= O:
+            # Green Candle: Open -> Low -> High -> Close
+            # A. Check Buys at Low
+            buy_mask = (~positions) & (buy_levels >= L - 1e-9)
+            for level_idx in np.where(buy_mask)[0]:
+                positions[level_idx] = True
+                position_buy_prices[level_idx] = buy_levels[level_idx]
+                trade_log.append({
+                    'timestamp': ts_str,
+                    'type': 'BUY',
+                    'level': int(level_idx + 1),
+                    'price': round(float(buy_levels[level_idx]), 2),
+                    'profit': None
+                })
+
+            # B. Check Sells at High
+            sell_mask = (positions) & (sell_levels <= H + 1e-9)
+            for level_idx in np.where(sell_mask)[0]:
+                profit = float(level_profits[level_idx])
+                trade_count += 1
+                total_profit += profit
+                positions[level_idx] = False
+                trade_log.append({
+                    'timestamp': ts_str,
+                    'type': 'SELL',
+                    'level': int(level_idx + 1),
+                    'price': round(float(sell_levels[level_idx]), 2),
+                    'profit': round(profit, 4)
+                })
+
+        else:
+            # Red Candle: Open -> High -> Low -> Close
+            # A. Check Sells at High
+            sell_mask = (positions) & (sell_levels <= H + 1e-9)
+            for level_idx in np.where(sell_mask)[0]:
+                profit = float(level_profits[level_idx])
+                trade_count += 1
+                total_profit += profit
+                positions[level_idx] = False
+                trade_log.append({
+                    'timestamp': ts_str,
+                    'type': 'SELL',
+                    'level': int(level_idx + 1),
+                    'price': round(float(sell_levels[level_idx]), 2),
+                    'profit': round(profit, 4)
+                })
+
+            # B. Check Buys at Low
+            buy_mask = (~positions) & (buy_levels >= L - 1e-9)
+            for level_idx in np.where(buy_mask)[0]:
+                positions[level_idx] = True
+                position_buy_prices[level_idx] = buy_levels[level_idx]
+                trade_log.append({
+                    'timestamp': ts_str,
+                    'type': 'BUY',
+                    'level': int(level_idx + 1),
+                    'price': round(float(buy_levels[level_idx]), 2),
+                    'profit': None
+                })
+
+    return {
+        'num_grids': num_grids,
+        'spacing': spacing,
+        'total_trades': trade_count,
+        'total_profit': total_profit,
+        'roi_percent': (total_profit / capital) * 100,
+        'trade_log': trade_log
+    }
+
+
 def run_optimization(
     df: pd.DataFrame,
     lower: float,
