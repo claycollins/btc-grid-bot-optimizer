@@ -14,6 +14,8 @@ const state = {
     tradesChart: null,
     allResults: [],
     candleData: [],             // Store candle data for CSV download
+    tradeLog: [],               // Store trade log for display and download
+    tradeLogFilter: 'all',      // Current trade log filter
     lastSymbol: 'BTCUSDT',      // Track last optimization params for CSV download
     lastLookbackDays: 30,
     sortColumn: 'total_profit',
@@ -381,6 +383,27 @@ function displayResults(result) {
         }
     }
 
+    // Populate trade log
+    if (result.trade_log && result.trade_log.length > 0) {
+        state.tradeLog = result.trade_log;
+        state.tradeLogFilter = 'all';
+        document.getElementById('trade-log-count').textContent = `(${result.trade_log.length} trades)`;
+        populateTradeLog(result.trade_log);
+        document.getElementById('trade-log-container').style.display = 'block';
+
+        // Set up filter button listeners
+        document.querySelectorAll('.btn-filter').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                state.tradeLogFilter = e.target.dataset.filter;
+                filterTradeLog();
+            });
+        });
+    } else {
+        document.getElementById('trade-log-container').style.display = 'none';
+    }
+
     // Create charts
     createCharts(result.all_results, optimal.num_grids);
 
@@ -631,6 +654,73 @@ function downloadCandles() {
     URL.revokeObjectURL(url);
 }
 
+// =============================================================================
+// TRADE LOG FUNCTIONS
+// =============================================================================
+
+function populateTradeLog(trades) {
+    const tbody = document.getElementById('trade-log-tbody');
+    tbody.innerHTML = trades.map(trade => `
+        <tr>
+            <td>${trade.timestamp}</td>
+            <td class="${trade.type === 'BUY' ? 'trade-buy' : 'trade-sell'}">${trade.type}</td>
+            <td>${trade.level}</td>
+            <td>$${formatNumber(trade.price, 2)}</td>
+            <td class="${trade.profit ? 'profit-cell' : ''}">${trade.profit ? '$' + formatNumber(trade.profit, 4) : '-'}</td>
+        </tr>
+    `).join('');
+}
+
+function filterTradeLog() {
+    const filter = state.tradeLogFilter;
+    let filtered = state.tradeLog;
+
+    if (filter !== 'all') {
+        filtered = state.tradeLog.filter(t => t.type === filter);
+    }
+
+    document.getElementById('trade-log-count').textContent = `(${filtered.length} trades)`;
+    populateTradeLog(filtered);
+}
+
+function downloadTradeLog() {
+    if (!state.tradeLog || state.tradeLog.length === 0) {
+        alert('No trade log available. Please run an optimization first.');
+        return;
+    }
+
+    // Generate CSV content
+    const headers = ['timestamp', 'type', 'level', 'price', 'profit'];
+    const csvRows = [headers.join(',')];
+
+    for (const trade of state.tradeLog) {
+        const row = [
+            trade.timestamp,
+            trade.type,
+            trade.level,
+            trade.price,
+            trade.profit || ''
+        ].join(',');
+        csvRows.push(row);
+    }
+
+    const csvContent = csvRows.join('\n');
+
+    // Create blob and trigger download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = `trade_log_${state.lastSymbol}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
+
 // Global functions
 window.resetUI = resetUI;
 window.downloadCandles = downloadCandles;
+window.downloadTradeLog = downloadTradeLog;
