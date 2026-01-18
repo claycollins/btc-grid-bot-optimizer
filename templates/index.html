@@ -145,25 +145,6 @@
                         </button>
                     </div>
 
-                    <!-- Grid Levels -->
-                    <div class="grid-levels-container" id="grid-levels-container" style="display: none;">
-                        <h3>Suggested Grid Levels <span id="grid-range-label"></span></h3>
-                        <div class="grid-levels-table-wrapper">
-                            <table class="grid-levels-table">
-                                <thead>
-                                    <tr>
-                                        <th>Level</th>
-                                        <th>Buy Price</th>
-                                        <th>Sell Price</th>
-                                        <th>Profit/Trade</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="grid-levels-tbody">
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
                     <!-- Charts -->
                     <div class="charts-container">
                         <div class="chart-wrapper">
@@ -178,7 +159,7 @@
 
                     <!-- Results Table -->
                     <div class="table-container">
-                        <h3>Top 20 Configurations</h3>
+                        <h3>Top 20 Configurations <span class="table-hint">(click a row to see details)</span></h3>
                         <table class="results-table" id="results-table">
                             <thead>
                                 <tr>
@@ -196,9 +177,28 @@
                         </table>
                     </div>
 
+                    <!-- Grid Levels -->
+                    <div class="grid-levels-container" id="grid-levels-container" style="display: none;">
+                        <h3>Grid Levels for <span id="selected-grids-count">--</span> Grids <span id="grid-range-label"></span></h3>
+                        <div class="grid-levels-table-wrapper">
+                            <table class="grid-levels-table">
+                                <thead>
+                                    <tr>
+                                        <th>Level</th>
+                                        <th>Buy Price</th>
+                                        <th>Sell Price</th>
+                                        <th>Profit/Trade</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="grid-levels-tbody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <!-- Trade Log -->
                     <div class="trade-log-container" id="trade-log-container" style="display: none;">
-                        <h3>Trade Log <span id="trade-log-count"></span></h3>
+                        <h3>Trade Log for <span id="trade-log-grids">--</span> Grids <span id="trade-log-count"></span></h3>
                         <div class="trade-log-controls">
                             <button class="btn-filter active" data-filter="all">All</button>
                             <button class="btn-filter" data-filter="BUY">Buys</button>
@@ -219,6 +219,9 @@
                                 <tbody id="trade-log-tbody">
                                 </tbody>
                             </table>
+                        </div>
+                        <div class="trade-log-loading" id="trade-log-loading" style="display: none;">
+                            Loading trade log...
                         </div>
                     </div>
                 </div>

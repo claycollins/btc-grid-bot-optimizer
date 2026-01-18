@@ -623,6 +623,13 @@ body {
     background-color: var(--bg-tertiary);
 }
 
+.trade-log-loading {
+    text-align: center;
+    padding: var(--spacing-lg);
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
 /* Charts */
 .charts-container {
     display: grid;
@@ -666,6 +673,13 @@ body {
     margin-bottom: var(--spacing-md);
 }
 
+.table-hint {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
 .results-table {
     width: 100%;
     border-collapse: collapse;
@@ -702,17 +716,28 @@ body {
 
 .results-table tbody tr {
     transition: background-color 0.2s;
+    cursor: pointer;
 }
 
 .results-table tbody tr:hover {
     background-color: var(--bg-tertiary);
 }
 
-.results-table tbody tr:first-child {
+.results-table tbody tr.selected {
+    background-color: rgba(88, 166, 255, 0.2);
+    border-left: 3px solid var(--accent-primary);
+}
+
+.results-table tbody tr.selected td {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.results-table tbody tr:first-child:not(.selected) {
     background-color: rgba(88, 166, 255, 0.1);
 }
 
-.results-table tbody tr:first-child td {
+.results-table tbody tr:first-child:not(.selected) td {
     color: var(--accent-primary);
     font-weight: 600;
 }

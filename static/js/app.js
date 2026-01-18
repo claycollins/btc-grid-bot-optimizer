@@ -19,7 +19,11 @@ const state = {
     lastSymbol: 'BTCUSDT',      // Track last optimization params for CSV download
     lastLookbackDays: 30,
     sortColumn: 'total_profit',
-    sortDirection: 'desc'
+    sortDirection: 'desc',
+    selectedGridCount: null,    // Track selected row's grid count
+    lowerLimit: 0,              // Store price range for grid calculations
+    upperLimit: 0,
+    capital: 0
 };
 
 const API_BASE = '';
@@ -307,19 +311,25 @@ function displayResults(result) {
     // Store candle data for CSV download
     state.candleData = result.candle_data || [];
 
+    // Store parameters for grid calculations
+    const optimal = result.optimal;
+    state.lowerLimit = optimal.lower_limit;
+    state.upperLimit = optimal.upper_limit;
+    state.capital = parseFormattedNumber(document.getElementById('capital').value);
+    state.selectedGridCount = optimal.num_grids;
+
     // Show results panel
     document.getElementById('results-placeholder').style.display = 'none';
     document.getElementById('error-message').style.display = 'none';
     document.getElementById('results-content').style.display = 'block';
 
     // Update summary cards
-    const optimal = result.optimal;
     document.getElementById('optimal-grids').textContent = optimal.num_grids;
-    document.getElementById('grid-spacing').textContent = `$${formatNumber(optimal.spacing, 2)}`;
-    document.getElementById('total-profit').textContent = `$${formatNumber(optimal.total_profit, 2)}`;
+    document.getElementById('grid-spacing').textContent = `$${formatNumber(optimal.spacing, 0)}`;
+    document.getElementById('total-profit').textContent = `$${formatNumber(optimal.total_profit, 0)}`;
     document.getElementById('roi-percent').textContent = `${formatNumber(optimal.roi_percent, 2)}%`;
     document.getElementById('total-trades').textContent = formatNumber(optimal.total_trades, 0);
-    document.getElementById('profit-per-trade').textContent = `$${formatNumber(optimal.profit_per_trade, 4)}`;
+    document.getElementById('profit-per-trade').textContent = `$${formatNumber(optimal.profit_per_trade, 0)}`;
 
     // Update data info
     const info = result.data_info;
@@ -360,6 +370,8 @@ function displayResults(result) {
     const gridLevelsContainer = document.getElementById('grid-levels-container');
     if (gridLevelsContainer) {
         if (optimal.grid_levels && optimal.grid_levels.length > 0) {
+            // Update headers with selected grid count
+            document.getElementById('selected-grids-count').textContent = optimal.num_grids;
             const gridRangeLabel = document.getElementById('grid-range-label');
             if (gridRangeLabel) {
                 gridRangeLabel.textContent = `($${formatNumber(optimal.lower_limit, 0)} - $${formatNumber(optimal.upper_limit, 0)})`;
@@ -372,7 +384,7 @@ function displayResults(result) {
                         <td>${level.level}</td>
                         <td class="buy-price">$${formatNumber(level.buy_price, 2)}</td>
                         <td class="sell-price">$${formatNumber(level.sell_price, 2)}</td>
-                        <td>$${formatNumber(level.profit_per_trade, 4)}</td>
+                        <td>$${formatNumber(level.profit_per_trade, 0)}</td>
                     </tr>
                 `).join('');
             }
@@ -387,6 +399,7 @@ function displayResults(result) {
     if (result.trade_log && result.trade_log.length > 0) {
         state.tradeLog = result.trade_log;
         state.tradeLogFilter = 'all';
+        document.getElementById('trade-log-grids').textContent = optimal.num_grids;
         document.getElementById('trade-log-count').textContent = `(${result.trade_log.length} trades)`;
         populateTradeLog(result.trade_log);
         document.getElementById('trade-log-container').style.display = 'block';
@@ -563,16 +576,24 @@ function createCharts(results, optimalGrids) {
 function populateTable(results) {
     const tbody = document.getElementById('results-tbody');
     tbody.innerHTML = results.map((r, i) => `
-        <tr>
+        <tr data-grids="${r.num_grids}" class="${r.num_grids === state.selectedGridCount ? 'selected' : ''}">
             <td>${r.num_grids}</td>
-            <td>$${formatNumber(r.spacing, 2)}</td>
+            <td>$${formatNumber(r.spacing, 0)}</td>
             <td>${formatNumber(r.total_trades, 0)}</td>
-            <td>$${formatNumber(r.total_profit, 2)}</td>
+            <td>$${formatNumber(r.total_profit, 0)}</td>
             <td>${formatNumber(r.roi_percent, 2)}%</td>
-            <td>$${formatNumber(r.profit_per_trade || 0, 4)}</td>
+            <td>$${formatNumber(r.profit_per_trade || 0, 0)}</td>
             <td>${formatNumber(r.trades_per_day || 0, 1)}</td>
         </tr>
     `).join('');
+
+    // Add click handlers to rows
+    tbody.querySelectorAll('tr').forEach(row => {
+        row.addEventListener('click', () => {
+            const numGrids = parseInt(row.dataset.grids);
+            selectConfiguration(numGrids);
+        });
+    });
 }
 
 function handleSort(column) {
@@ -601,6 +622,97 @@ function handleSort(column) {
             th.classList.add(state.sortDirection === 'asc' ? 'sorted-asc' : 'sorted-desc');
         }
     });
+}
+
+// =============================================================================
+// CONFIGURATION SELECTION
+// =============================================================================
+
+async function selectConfiguration(numGrids) {
+    // Update state
+    state.selectedGridCount = numGrids;
+
+    // Update row highlighting
+    document.querySelectorAll('#results-tbody tr').forEach(row => {
+        row.classList.remove('selected');
+        if (parseInt(row.dataset.grids) === numGrids) {
+            row.classList.add('selected');
+        }
+    });
+
+    // Update grid levels (calculate client-side)
+    updateGridLevels(numGrids);
+
+    // Update trade log header to show loading
+    document.getElementById('trade-log-grids').textContent = numGrids;
+    document.getElementById('trade-log-count').textContent = '(loading...)';
+    document.getElementById('trade-log-loading').style.display = 'block';
+    document.getElementById('trade-log-tbody').innerHTML = '';
+
+    // Fetch trade log from API
+    try {
+        const response = await fetch(`${API_BASE}/api/backtest/${state.currentJobId}/${numGrids}`);
+        const data = await response.json();
+
+        if (data.success) {
+            state.tradeLog = data.trade_log;
+            state.tradeLogFilter = 'all';
+            document.getElementById('trade-log-count').textContent = `(${data.trade_log.length} trades)`;
+            populateTradeLog(data.trade_log);
+
+            // Reset filter buttons
+            document.querySelectorAll('.btn-filter').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.filter === 'all') {
+                    btn.classList.add('active');
+                }
+            });
+        } else {
+            document.getElementById('trade-log-count').textContent = '(error loading)';
+        }
+    } catch (error) {
+        console.error('Error fetching trade log:', error);
+        document.getElementById('trade-log-count').textContent = '(error loading)';
+    }
+
+    document.getElementById('trade-log-loading').style.display = 'none';
+
+    // Show the containers
+    document.getElementById('grid-levels-container').style.display = 'block';
+    document.getElementById('trade-log-container').style.display = 'block';
+}
+
+function updateGridLevels(numGrids) {
+    const spacing = (state.upperLimit - state.lowerLimit) / numGrids;
+
+    // Update header
+    document.getElementById('selected-grids-count').textContent = numGrids;
+    document.getElementById('grid-range-label').textContent =
+        `($${formatNumber(state.lowerLimit, 0)} - $${formatNumber(state.upperLimit, 0)})`;
+
+    // Calculate and display grid levels
+    const gridLevels = [];
+    for (let i = 0; i < numGrids; i++) {
+        const buyPrice = state.lowerLimit + i * spacing;
+        const sellPrice = buyPrice + spacing;
+        const profitPerTrade = (state.capital / numGrids) * (spacing / buyPrice);
+        gridLevels.push({
+            level: i + 1,
+            buy_price: buyPrice,
+            sell_price: sellPrice,
+            profit_per_trade: profitPerTrade
+        });
+    }
+
+    const tbody = document.getElementById('grid-levels-tbody');
+    tbody.innerHTML = gridLevels.map(level => `
+        <tr>
+            <td>${level.level}</td>
+            <td class="buy-price">$${formatNumber(level.buy_price, 2)}</td>
+            <td class="sell-price">$${formatNumber(level.sell_price, 2)}</td>
+            <td>$${formatNumber(level.profit_per_trade, 0)}</td>
+        </tr>
+    `).join('');
 }
 
 // =============================================================================
@@ -666,7 +778,7 @@ function populateTradeLog(trades) {
             <td class="${trade.type === 'BUY' ? 'trade-buy' : 'trade-sell'}">${trade.type}</td>
             <td>${trade.level}</td>
             <td>$${formatNumber(trade.price, 2)}</td>
-            <td class="${trade.profit ? 'profit-cell' : ''}">${trade.profit ? '$' + formatNumber(trade.profit, 4) : '-'}</td>
+            <td class="${trade.profit ? 'profit-cell' : ''}">${trade.profit ? '$' + formatNumber(trade.profit, 0) : '-'}</td>
         </tr>
     `).join('');
 }

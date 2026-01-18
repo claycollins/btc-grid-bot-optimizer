@@ -397,6 +397,91 @@ def download_candles():
     )
 
 
+@app.route('/api/backtest/<job_id>/<int:num_grids>', methods=['GET'])
+def get_backtest_for_config(job_id, num_grids):
+    """Get trade log for a specific grid configuration."""
+    if job_id not in jobs:
+        return jsonify({
+            'success': False,
+            'error': 'Job not found'
+        }), 404
+
+    job = jobs[job_id]
+    if job['status'] != 'completed':
+        return jsonify({
+            'success': False,
+            'error': 'Job not completed'
+        }), 400
+
+    try:
+        params = job['params']
+        lower_limit = params['lower_limit']
+        upper_limit = params['upper_limit']
+        capital = params['capital']
+        lookback_days = params['lookback_days']
+        symbol = params['symbol']
+
+        # Fetch data again (will use cache)
+        if DB_AVAILABLE and candle_db.DATABASE_URL:
+            df, _ = optimizer.fetch_historical_klines_cached(
+                symbol=symbol,
+                interval='1m',
+                lookback_days=lookback_days,
+                verbose=False
+            )
+        else:
+            df = optimizer.fetch_historical_klines(
+                symbol=symbol,
+                interval='1m',
+                lookback_days=lookback_days,
+                verbose=False
+            )
+
+        if df.empty:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to fetch historical data'
+            }), 500
+
+        # Run detailed backtest for the specified grid count
+        detailed_result = optimizer.run_backtest_with_trades(
+            df=df,
+            num_grids=num_grids,
+            lower=lower_limit,
+            upper=upper_limit,
+            capital=capital
+        )
+
+        # Calculate grid levels
+        spacing = (upper_limit - lower_limit) / num_grids
+        grid_levels = []
+        for i in range(num_grids):
+            buy_price = lower_limit + i * spacing
+            sell_price = buy_price + spacing
+            profit_per_level = (capital / num_grids) * (spacing / buy_price)
+            grid_levels.append({
+                'level': i + 1,
+                'buy_price': round(buy_price, 2),
+                'sell_price': round(sell_price, 2),
+                'profit_per_trade': round(profit_per_level, 4)
+            })
+
+        return jsonify({
+            'success': True,
+            'num_grids': num_grids,
+            'trade_log': detailed_result.get('trade_log', []),
+            'grid_levels': grid_levels,
+            'total_trades': detailed_result.get('total_trades', 0),
+            'total_profit': detailed_result.get('total_profit', 0)
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint with database diagnostics."""
