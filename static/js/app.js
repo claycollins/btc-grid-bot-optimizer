@@ -655,10 +655,10 @@ async function selectConfiguration(numGrids) {
         const data = await response.json();
 
         if (data.success) {
-            state.tradeLog = data.trade_log;
+            state.tradeLog = data.trade_log || [];
             state.tradeLogFilter = 'all';
-            document.getElementById('trade-log-count').textContent = `(${data.trade_log.length} trades)`;
-            populateTradeLog(data.trade_log);
+            document.getElementById('trade-log-count').textContent = `(${state.tradeLog.length} trades)`;
+            populateTradeLog(state.tradeLog);
 
             // Reset filter buttons
             document.querySelectorAll('.btn-filter').forEach(btn => {
@@ -668,11 +668,14 @@ async function selectConfiguration(numGrids) {
                 }
             });
         } else {
-            document.getElementById('trade-log-count').textContent = '(error loading)';
+            console.error('Trade log API error:', data.error);
+            document.getElementById('trade-log-count').textContent = `(0 trades)`;
+            document.getElementById('trade-log-tbody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No trades for this configuration. Grid spacing may be too wide for price movements.</td></tr>`;
         }
     } catch (error) {
         console.error('Error fetching trade log:', error);
-        document.getElementById('trade-log-count').textContent = '(error loading)';
+        document.getElementById('trade-log-count').textContent = '(error)';
+        document.getElementById('trade-log-tbody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:#f85149;">Error: ${error.message}</td></tr>`;
     }
 
     document.getElementById('trade-log-loading').style.display = 'none';

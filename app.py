@@ -413,35 +413,32 @@ def get_backtest_for_config(job_id, num_grids):
             'error': 'Job not completed'
         }), 400
 
+    if not job.get('result'):
+        return jsonify({
+            'success': False,
+            'error': 'Job result not available'
+        }), 400
+
     try:
         params = job['params']
         lower_limit = params['lower_limit']
         upper_limit = params['upper_limit']
         capital = params['capital']
-        lookback_days = params['lookback_days']
-        symbol = params['symbol']
 
-        # Fetch data again (will use cache)
-        if DB_AVAILABLE and candle_db.DATABASE_URL:
-            df, _ = optimizer.fetch_historical_klines_cached(
-                symbol=symbol,
-                interval='1m',
-                lookback_days=lookback_days,
-                verbose=False
-            )
-        else:
-            df = optimizer.fetch_historical_klines(
-                symbol=symbol,
-                interval='1m',
-                lookback_days=lookback_days,
-                verbose=False
-            )
+        # Use stored candle data from the job result instead of re-fetching
+        result = job['result']
+        candle_data = result.get('candle_data', [])
 
-        if df.empty:
+        if not candle_data:
             return jsonify({
                 'success': False,
-                'error': 'Failed to fetch historical data'
+                'error': 'No candle data stored in job'
             }), 500
+
+        # Convert candle data back to DataFrame
+        import pandas as pd
+        df = pd.DataFrame(candle_data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
 
         # Run detailed backtest for the specified grid count
         detailed_result = optimizer.run_backtest_with_trades(
@@ -476,6 +473,9 @@ def get_backtest_for_config(job_id, num_grids):
         })
 
     except Exception as e:
+        import traceback
+        print(f"[ERROR] Backtest for config failed: {e}")
+        traceback.print_exc()
         return jsonify({
             'success': False,
             'error': str(e)
